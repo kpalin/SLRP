@@ -11,10 +11,25 @@ from numpy.lib._compiled_base import packbits, unpackbits
 from numpy.lib._iotools import LineSplitter, NameValidator, StringConverter, \
                      _is_string_like, has_nested_fields, flatten_dtype
 
-from numpy.lib.io import _getconv
 
 _file = file
 _string_like = _is_string_like
+
+def _getconv(dtype):
+    typ = dtype.type
+    if issubclass(typ, np.bool_):
+        return lambda x: bool(int(x))
+    if issubclass(typ, np.integer):
+        return lambda x: int(float(x))
+    elif issubclass(typ, np.floating):
+        return float
+    elif issubclass(typ, np.complex):
+        return complex
+    elif issubclass(typ, np.bytes_):
+        return bytes
+    else:
+        return str
+
 
 def loadtxt(fname, dtype=float, comments='#', delimiter=None, converters=None,
             skiprows=0, usecols=None, unpack=False,count = -1):
