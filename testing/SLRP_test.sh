@@ -30,14 +30,17 @@ OUTIBD=`basename ${INFAD} .fad`.ibd
 OUTLIKE=`basename ${INFAD} .fad`.like
 
 
-python-2.7 ${HOME}/Kuusamo/scripts/testing/SLRP/SLRP.py -n2  \
+python-2.7  ${HOME}/Kuusamo/scripts/devel/SLRP/SLRP.py   \
     --geneticMap=${GENOMAP} \
-    --slice_length=1000 \
-    --ibdFile=test_NFBC.chr{LSB_JOBINDEX}.ibd.aibd
     --fadFile=${INFAD} \
-    --outFile=${OUTFAD}  \
+    --outFile=${OUTFAD}x  \
     --ibdSegCalls=${OUTIBD} \
-    --iterations=20 \
-    --likeFile=${OUTLIKE} 
+    --ibdFile=apu.aibd \
+    --iterations=20 --IBDcoverLimit=1
 
 
+#${INFAD} \
+##    --ibdCover=NFBC.chr22.lim200.cover --scoreLim=200 \
+#    --ibdFile=/lustre/scratch103/sanger/kp5/Suomi/genotypes/NFBC/phase-2011-02-04/NFBC.chr${LSB_JOBINDEX}.ibd.aibd \
+#   --ibdFile=
+#    --ibdFile=test_NFBC.chr${LSB_JOBINDEX}.ibd.aibd \

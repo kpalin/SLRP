@@ -809,8 +809,18 @@ class longRangePhase:
 
 
 
+   def breakPhaseSymmetry(self, trimLength=0):
+      "Break symmetries on individuals that don't have any phase information from FAD file. Set one of the heterozygotes after beginning of the ibdSegments to phased state."
+      indivsWithoutPhase = numpy.where(self.haplos.var(axis=2).max(axis=0) == 0.0)[0]
 
+      breakableSNPs = numpy.where(self.haplos[trimLength:,:,0]==2)
 
+      _,idx = numpy.unique(breakableSNPs[1],return_index=True)
+      breakableSNPs = (breakableSNPs[0][idx],breakableSNPs[1][idx])
+      mask = numpy.in1d(breakableSNPs[1], indivsWithoutPhase)
+      self.haplos[breakableSNPs[0][mask]+trimLength,breakableSNPs[1][mask]] = [0,1]
+
+      return sum(mask)
 
    def __setLikelihoods(self):
       "Initialize haplotype likelihood array"
@@ -1300,18 +1310,26 @@ class longRangePhase:
       assert ( self.__ibd["endM"] < self.markers ).all()
 
 
+   def haveIBD(self):
+      return self.__ibd is not None
 
    def __ibdSegmentsToIBD(self):
       "Convert the parsimonious 4 value ibd segment information to IBD file format"
       if len(self.ibdSegments) > 0:  # DANGER!!! over writes the input ibd data
          printerr("Setting __ibd")
          printerr("Starting:",time.asctime())
-         self.__ibd = numpy.array( [(x[0], x[1], self.snpCMpos[x[3]] - self.snpCMpos[x[2]],
-                                     x[2],x[3], self.snpPos[x[2]], self.snpPos[x[3]] ) for x in self.ibdSegments],
-                                   dtype = self.__ibd_dtype)
+#          self.__ibd = numpy.array( [(x[0], x[1], self.snpCMpos[x[3]] - self.snpCMpos[x[2]],
+#                                      x[2],x[3], self.snpPos[x[2]], self.snpPos[x[3]] ) for x in self.ibdSegments],
+#                                    dtype = self.__ibd_dtype)
+         self.__ibd = numpy.fromiter( ((x[0], x[1], self.snpCMpos[x[3]] - self.snpCMpos[x[2]],
+                                        x[2],x[3], self.snpPos[x[2]], self.snpPos[x[3]] ) for x in self.ibdSegments),
+                                      dtype = self.__ibd_dtype,
+                                      count = len(self.ibdSegments))
          printerr("Done:",time.asctime())
+      else:
+         # Should do something intelligent, e.g. warn that couldn't find any IBD segments.
+         pass
       
-       
    def ibdCoverCounts(self,scoreLimit = 0.0 ):
       "Calculate the coverage of the called IBD relations for each site x haplotype"
       ibdCoverCounts=numpy.zeros( (self.markers, 2*self.indivs),
@@ -1367,10 +1385,6 @@ class longRangePhase:
       bt=self.__assist.backtrack
       
       #printerr("Running __computeOneIBDnoUpdate")
-      if False and options.test:
-         ca2p[:]=-1.0
-      
-         bt[:]=-2
 
       #TODO: Move more stuff to C
          
@@ -1621,6 +1635,7 @@ class longRangePhase:
       #TODO: Improve speed. Takes 15% of time, excluding the C part
       self.____assist_arrays()
 
+
       #ca2pN=self.__assist.cp2pN
       ca2pP=self.__assist.cp2pP
       ca2p=self.__assist.ca2p
@@ -1637,12 +1652,6 @@ class longRangePhase:
       #firstCP2P=numpy.zeros(5)
       #print "firstCP2P:",firstCP2P
       #print endM,type(endM)
-      if False and options.test:
-
-         ca2pP[:]=-numpy.inf
-         ca2p[:]=-numpy.inf
-      
-         bt[:]=-2
 
       #TODO: Move more stuff to C
       hLike1 = self.hLike[ind1/2,beginM:endM+1,:].view(numpy.ndarray)
@@ -1661,7 +1670,7 @@ class longRangePhase:
 
       # Get rid of bliz converters. They take 67% of runtime.
       codeNormBT="""
-#line 1624 "longRangePhaseMP.py"
+#line 1664 "longRangePhaseMP.py"
 
             int ij,j;
             int h0,h1,p,p1;
@@ -1843,6 +1852,12 @@ class longRangePhase:
          self.__lock_inlining()
       #printerr("X")   
       #pdb.set_trace()
+      # Nasty formatting 
+      endM = int(endM)
+      beginM = int(beginM)
+      ind1 = int(ind1)
+      ind2 = int(ind2)
+
       sum_sqr_E = weave.inline(codeNormBT%({"cdType":self.cDataType}), ["bt","ca2h1","ca2h2","ca2pP","ca2p","beginM","endM","CPT","h12ca","h22ca","dampF","firstCP2P"], \
                                type_converters=converters.blitz,compiler="gcc",verbose=9,force=False,
                                #                   extra_compile_args=["-msse2","-ftree-vectorize","-ftree-vectorizer-verbose=0","-g"])
@@ -1872,15 +1887,14 @@ class longRangePhase:
 
       #if bt[4,beginM+1:endM+2].min()<4:
       #   pass
-         #pdb.set_trace()
       if serializedPass:
          self.__unlock_inlining()
          printerr("Returned from locking")
-
+         
 
       self.firstPhase=False
 
-      if False and options.test and ( ind1,ind2) in ((118,156),(0,52) ):
+      if False and ( ind1,ind2) in ((118,156),(0,52) ):
          def normalize_beliefs(x):
             x = numpy.exp(-x)
             return x/x.sum(axis=0)
@@ -1936,23 +1950,11 @@ class longRangePhase:
          
          #self.hLike[ind1/2,beginM:endM+1,:]+=ca2h1[:,:]
          #self.hLike[ind2/2,beginM:endM+1,:]+=ca2h2[:,:]
-         if options.test and 12 in (ind1, ind2) and endM==7504:
-            print "before:\n",self.hLike[6,7500:,:]
-            if ind1==12:
-               print "Add:\n",ca2h1_delta[endM-beginM+1-4:endM-beginM+1]
-               print "het vote:", ca2h1_delta[endM-beginM,2]-ca2h1_delta[endM-beginM,1]
-            else:
-               print "Add:\n",ca2h2_delta[endM-beginM+1-4:endM-beginM+1]
-               print "het vote:", ca2h2_delta[endM-beginM,2]-ca2h2_delta[endM-beginM,1]
             
          #printerr("ADDING")
          self.hLike.ADD( (ind1/2, slice(beginM, endM+1), slice(None) ), ca2h1_delta[:endM-beginM+1])
          self.hLike.ADD( (ind2/2, slice(beginM, endM+1), slice(None) ), ca2h2_delta[:endM-beginM+1])
          #printerr("ADDED")
-         if options.test and 12 in (ind1, ind2) and endM==7504:
-            print "After:\n",self.hLike[6,7500:,:]
-            print "het stand:",self.hLike[6,7504,2]-self.hLike[6,7504,1]
-            print "\n\n\n"
 
          #if self.myRank == 2:
          #   hLike1_new =  self.hLike[ind1/2,beginM:endM+1,:]
@@ -2155,7 +2157,12 @@ class longRangePhase:
               self.writeIBD(foutName)
 
            errImpro = prevMeanSqrE - totMeanSqrE
-           printerr("Mean squared error for %dth repeat: %g (improvement %g,  %g%%)"%(repeat,totMeanSqrE, errImpro, errImpro * 100.0 / prevMeanSqrE ))
+           try:
+              improProp = errImpro * 100.0 / prevMeanSqrE
+           except ZeroDivisionError:
+              raise
+              pass
+           printerr("Mean squared error for %dth repeat: %g (improvement %g,  %g%%)"%(repeat,totMeanSqrE, errImpro, improProp ))
            prevMeanSqrE = totMeanSqrE
 
 
@@ -2186,6 +2193,7 @@ class longRangePhase:
 
 
 
+           #meanSqrD[0]=self.__computeOneIBD(ind1,ind2,beginM,endM,ca2h1,ca2h2, doUpdate = True, serializedPass = firstIteration )
            meanSqrD[0]=self.__computeOneIBD(ind1,ind2,beginM,endM,ca2h1,ca2h2, doUpdate = True, serializedPass = firstIteration )
 
            firstIteration = False
@@ -2655,101 +2663,178 @@ class longRangePhase:
          #self.__assist.p2cpN=numpy.zeros((5,self.markers+1),dtype=self.dataType,order='F')
          #self.__assist.p2cpP=numpy.zeros((5,self.markers),dtype=self.dataType,order='F')
          self.__assist.backtrack=numpy.zeros((5,self.markers+1),dtype=numpy.int,order='F')
-#         printerr("Memory for assistant arrays: %gMB"%( ((self.__assist.cp2pN.nbytes + self.__assist.backtrack.nbytes +\
-#                                                          self.__assist.cp2pP.nbytes + self.__assist.ca2p.nbytes +\
-#                                                          self.__assist.p2ca.nbytes  + self.__assist.p2cpN.nbytes + \
-#                                                          self.__assist.p2cpP.nbytes) / 2.0**20 )))
 
-      
-   def phase(self,iterations=10,intFADbase=None,intIBDbase=None):
-      "Compute the long range phase over IBD segments in allocedIBD"
+
+   def filterIBDcover(self, coverLimit, lenLimit = -1):
+      "Filter IBD segments according to haplotype coverage and length (hard length limit"
+      segLengthDesc = self.__ibd["score"].argsort()[::-1]
+
+      ibdCoverCounts = numpy.zeros( (self.markers, self.indivs,2),
+                                    dtype=numpy.uint32)
 
       self.__waitIBD()
+      #pdb.set_trace()
 
-      if self.__ibd is not None:
-         if iterations > 0:
-            allocedIBD = []
-            step_len = min( self.slice_len, self.markers)
+      ibdSequence = (self.__ibd[i] for i in segLengthDesc if self.__ibd["endM"][i]-self.__ibd["beginM"][i] +1 >= lenLimit)
 
-            ibd_segment_cache = set()
+      allocedSize = 1000
+      nextIdxToFill = 0
+      newIBD = numpy.recarray(shape=(allocedSize,),dtype = self.__ibd_dtype)
+      addCount,skipCount = 0,0
 
-            for firstBase in range(0, self.markers, step_len):
-               lastBase = firstBase + step_len
-               #allocedIBD = []
-               allocedIBD = [ (x[0],x[1],x[2],
-                               min(lastBase, x[7]),
-                               x[4],x[5],
-                               numpy.array([1e99], dtype = self.dataType),
-                               x[7]) for x in allocedIBD if firstBase< x[7]  ] # Previous segments that spill over to this span of markers
-
-               # Segments that start within this span of markers
-               allocedIBD.extend( [(int(x["ind1"] - x["ind1"] % 2),
-                                    int(x["ind2"] - x["ind2"] % 2), 
-                                    int(max(0, int(x["beginM"]) - 10)),
-                                    int(min(self.markers-1, int(x["endM"]) + 10, lastBase)), 
-                                    numpy.zeros((min(self.markers-1,x["endM"] + 10) - max(0, x["beginM"] - 10) + 1, 4), dtype = self.dataType),
-                                    numpy.zeros((min(self.markers-1,x["endM"] + 10) - max(0, x["beginM"] - 10) + 1, 4), dtype = self.dataType),
-                                    numpy.array([1e99], dtype = self.dataType),
-                                    min(self.markers-1, int(x["endM"]) + 10 ) ) \
-                                   for  x in self.__ibd if (firstBase<= x["beginM"] < lastBase) and ((x["endM"] - x["beginM"] + 1) >= self.minIBDlength) ] )
-
-               printerr( self.__ibd.shape, len(allocedIBD), self.minIBDlength)
-
-               allocedIBD.sort(key = lambda x:(x[2],-x[3]))
-
-               printerr("Allocated %gMB for %d IBD regions overlapping markers %d - %d"%( sum(x[4].nbytes+x[5].nbytes+x[6].nbytes for x in allocedIBD) * 1.0 / 2.0**20,
-                                                                                          len(allocedIBD), firstBase, lastBase) )
-
-               if self.poolSize <= 1 :
-                  self.iterateOverIBD(allocedIBD,iterations,intermedFAD=intFADbase,intermedIBD=intIBDbase)
-               else:
-                  # Threading
-                  chunkSize = int( len(allocedIBD) * 1.0 / self.poolSize + 1) 
-                  handythread.foreach(lambda chunk: self.iterateOverIBD(chunk, iterations, intermedFAD=intFADbase,intermedIBD=intIBDbase),
-                                      [allocedIBD[(i*chunkSize):((i+1)*chunkSize)] for i in range(self.poolSize) ], threads = self.poolSize )
-               ibd_segment_cache.update(self.ibdSegments)
+      for ind1,ind2,score,beginM,endM,beginBP,endBP in ibdSequence:
+            i1view = ibdCoverCounts[beginM:endM+1,ind1/2,ind1%2]
+            i2view = ibdCoverCounts[beginM:endM+1,ind2/2,ind2%2]
+            if min(i1view.min(),i2view.min()) < coverLimit:
+               #printerr("Adding",ind1,ind2,beginM,endM)
+               i1view += 1
+               i2view += 1
+               if len(newIBD) <= nextIdxToFill:
+                  i1view = None
+                  i2view = None
+                  printerr("Extending newIBD to",len(newIBD)*2)
+                  newIBD.resize((len(newIBD)*2,))
+                  
+               newIBD[nextIdxToFill] = (ind1,ind2,score,beginM,endM,beginBP,endBP)
+               nextIdxToFill += 1
+               addCount += 1
             else:
-               pass
-            self.ibdSegments = list(ibd_segment_cache)
+               skipCount += 1
+               #printerr("Skipping",ind1,ind2,beginM,endM,"Because",i1view.min(),i2view.min())
+
+      i1view = None
+      i2view = None
+      
+      self.__ibd = newIBD
+      newIBD = None
+      self.__ibd.resize((nextIdxToFill,))
+      
+      return (addCount,skipCount,ibdCoverCounts)
+
+      
+
+   allocedIBD_dtype = { 'names' : ( "ind1firstHaplo", "ind2firstHaplo",  "beginMarker",  "lastMarkerFilled", "p2h1", "p2h2",  "prevMeanSqrDiff", "endMarker"),
+                        'formats' : (numpy.int32,     numpy.int32,       numpy.int32,    numpy.int32,   numpy.object, numpy.object, (numpy.float64,(1,1)), numpy.int32) }
+
+
+
+   def phasePreProc(self, ibdSegmentCalls = None):
+      "Compute the first step of SLRP. i.e. find putative IBD segments"
+      allPairs = ((2*ind1,2*ind2)  for ind2 in xrange(self.indivs) for ind1 in xrange(ind2))
+      numPairs = self.indivs * ( self.indivs - 1 ) / 2
+      #random.shuffle(allPairs)
+      ibdRegions=[]
+      newTime=time.time()
+      startTime=newTime
+
+      if self.poolSize <= 1:
+         ibdRegions=self.__computeOneIBDnoUpdate( list(allPairs) )
       else:
+         #TODO: use numpy rec arrays instead of lists. Should be much faster.
+         chunkSize = int( numPairs * 1.0 / self.poolSize + 1) 
 
+         printerr("Chunks of size",chunkSize)
+         subsetPairs=list( list(it.islice(allPairs,chunkSize))  for i in range(0, numPairs, chunkSize) )
+         printerr("subsets",len(subsetPairs),[len(x) for x in subsetPairs])
+         #self.__computeOneIBDnoUpdate([])
+         ibdRegions=it.chain(*self.pmap(self.__computeOneIBDnoUpdate, subsetPairs ))
+         newTime = time.time()
+      printerr( "All pairs took %g mins"%( ( time.time() - startTime ) / 60.0 ))
 
-         allPairs = ((2*ind1,2*ind2)  for ind2 in xrange(self.indivs) for ind1 in xrange(ind2))
-         numPairs = self.indivs * ( self.indivs - 1 ) / 2
-         #random.shuffle(allPairs)
-         ibdRegions=[]
-         newTime=time.time()
-         startTime=newTime
+      self.__ibd = numpy.fromiter(((ind1,ind2,stopM-startM+1,startM,stopM,self.snpPos[startM],self.snpPos[stopM]) for ind1,ind2,startM,stopM in ibdRegions),
+                                  dtype = self.__ibd_dtype )
 
-         if self.poolSize <= 1:
-            ibdRegions=self.__computeOneIBDnoUpdate( list(allPairs) )
-         else:
-            #TODO: use numpy rec arrays instead of lists. Should be much faster.
-            chunkSize = int( numPairs * 1.0 / self.poolSize + 1) 
-
-            printerr("Chunks of size",chunkSize)
-            subsetPairs=list( list(it.islice(allPairs,chunkSize))  for i in range(0, numPairs, chunkSize) )
-            printerr("subsets",len(subsetPairs),[len(x) for x in subsetPairs])
-            #self.__computeOneIBDnoUpdate([])
-            ibdRegions=it.chain(*self.pmap(self.__computeOneIBDnoUpdate, subsetPairs ))
-            newTime = time.time()
-         printerr( "All pairs took %g mins"%( ( time.time() - startTime ) / 60.0 ))
-
-         self.__ibd = numpy.fromiter(((ind1,ind2,stopM-startM+1,startM,stopM,self.snpPos[startM],self.snpPos[stopM]) for ind1,ind2,startM,stopM in ibdRegions),
-                                     dtype = self.__ibd_dtype )
-
-         if options.ibdSegmentCalls is not None:
-            open(options.ibdSegmentCalls+".aibd","w").writelines("%d\t%d\t%g\t%d\t%d\t%d\t%d\n"%(x[0],x[1],x[2],x[3],x[4],x[5],x[6]) for x in self.__ibd)
-            printerr("Max end",max(x[4] for x in self.__ibd))
+      if ibdSegmentCalls is not None:
+         open(ibdSegmentCalls+".aibd","w").writelines("%d\t%d\t%g\t%d\t%d\t%d\t%d\n"%(x[0],x[1],x[2],x[3],x[4],x[5],x[6]) for x in self.__ibd)
+         printerr("Max end",max(x[4] for x in self.__ibd))
 
 
 
          
-         if len(self.__ibd) > 0:
-            if self.worldSize <= 1 :
-               self.phase(iterations,intFADbase,intIBDbase)
-            else:
-               self.phaseMPI(iterations)
+#          if len(self.__ibd) > 0:
+#             if self.worldSize <= 1 :
+#                self.phase(iterations,intFADbase,intIBDbase,ibdSegmentCalls)
+#             else:
+#                self.phaseMPI(iterations)
+      
+   def phase(self,iterations=10,intFADbase=None,intIBDbase=None):
+      "Compute the long range phase over IBD segments in allocedIBD"
+
+      if iterations < 1:  # Don't do anything if there is nothing to do
+         return
+
+      self.__waitIBD()
+      assert(self.__ibd is not None)
+      
+
+      allocedIBD = numpy.array([], dtype = self.allocedIBD_dtype)
+
+      step_len = min( self.slice_len, self.markers)
+
+      ibd_segment_cache = set()
+
+      for firstBase in range(0, self.markers, step_len):
+         lastBase = firstBase + step_len
+         #allocedIBD = []
+
+         allocedIBD = allocedIBD[ allocedIBD["endMarker"] >= firstBase ]
+         allocedIBD["lastMarkerFilled"] = numpy.minimum(lastBase, allocedIBD["endMarker"])
+         allocedIBD["prevMeanSqrDiff"] = 1e99
+
+
+
+
+
+         # Segments that start within this span of markers
+
+         oldIBDcount = len(allocedIBD)
+         # Indicators to self.__ibd for rows to add to allocedIBD
+         toAllocIBDindicator =  numpy.logical_and( numpy.logical_and( firstBase<= self.__ibd["beginM"], self.__ibd["beginM"] < lastBase),
+                                               (self.__ibd["endM"] - self.__ibd["beginM"] + 1) >= self.minIBDlength)
+
+
+         printerr( self.__ibd.shape, len(allocedIBD), self.minIBDlength,sum(toAllocIBDindicator))
+
+         newIBD = numpy.array( [(int(x["ind1"] - x["ind1"] % 2),
+                                 int(x["ind2"] - x["ind2"] % 2), 
+                                 int(max(0, int(x["beginM"]) - 10)),
+                                 int(min(self.markers-1, int(x["endM"]) + 10, lastBase)), 
+                                 numpy.zeros((min(self.markers-1,x["endM"] + 10) - max(0, x["beginM"] - 10) + 1, 4), dtype = self.dataType),
+                                 numpy.zeros((min(self.markers-1,x["endM"] + 10) - max(0, x["beginM"] - 10) + 1, 4), dtype = self.dataType),
+                                 numpy.array([1e99], dtype = self.dataType),
+                                 min(self.markers-1, int(x["endM"]) + 10 ) ) \
+                                for  x in self.__ibd[toAllocIBDindicator] ] ,
+                               dtype = self.allocedIBD_dtype)
+
+
+
+         #allocedIBD.sort(key = lambda x:(x[2],-x[3]))
+         newIBD.sort(order = [ "beginMarker","endMarker"] )  # TODO: Check results!! sort order is different from the list version
+
+         allocedIBD = numpy.hstack( [allocedIBD, newIBD] )
+         newIBD = None
+
+         if len(allocedIBD) == 0:
+            # Skip to next slice if there are no IBD segments to analyse
+            continue
+
+
+         printerr("Allocated %gMB for %d IBD regions overlapping markers %d - %d"%( sum(x[4].nbytes+x[5].nbytes+x[6].nbytes for x in allocedIBD) * 1.0 / 2.0**20,
+                                                                                    len(allocedIBD), firstBase, lastBase) )
+
+         if self.poolSize <= 1 :
+            self.iterateOverIBD(allocedIBD,iterations,intermedFAD=intFADbase,intermedIBD=intIBDbase)
+         else:
+            # Threading
+            chunkSize = int( len(allocedIBD) * 1.0 / self.poolSize + 1) 
+            handythread.foreach(lambda chunk: self.iterateOverIBD(chunk, iterations, intermedFAD=intFADbase,intermedIBD=intIBDbase),
+                                [allocedIBD[(i*chunkSize):((i+1)*chunkSize)] for i in range(self.poolSize) ], threads = self.poolSize )
+         ibd_segment_cache.update(self.ibdSegments)
+      else:
+         pass
+      self.ibdSegments = list(ibd_segment_cache)
+
+
 
             
 def process_args():
@@ -2812,8 +2897,14 @@ def process_args():
    
    parser.add_option("", "--IBDtransLimit", dest="IBDtransLimit",type="float",
                      help="Upper limit for probability of noIBD to IBD transition between two markers.  Default taken from population probabililties. [default: 4 * prob_ibd]", metavar="NUM",default=None )
+
+
+
    parser.add_option("", "--minIBDlength", dest="minIBDlength",type="int",
                      help="Hard lower limit for length of IBD segment in markers. This should speed up computation by disregarding uninformative IBS segments. [default: %default]", metavar="NUM",default=20 )
+
+   parser.add_option("", "--IBDcoverLimit", dest="ibdCoverLimit",type="int",
+                     help="Soft lower limit for number of IBD sharing. Only do message passing on the longest NUM segments covering a locus. The selection is greedy, hence there might be more than minimum number of segments used. Non positive limits turn off this limit. [default: %default]", metavar="NUM",default=-1 )
 
 
 
@@ -2908,11 +2999,10 @@ def process_args():
    return options
       
 
-if __name__ == "__main__":
-
-
+def main():
+   "Main function for long range phasing. Just to encapsulate the global variables."
    options = process_args()
-
+   global printerr
 
 
 
@@ -2985,6 +3075,12 @@ if __name__ == "__main__":
          rlp.loadFAD( options.fadFile )
          printerr("Read FAD!")
 
+
+         #trimLength = rlp.markers/2 if options.slice_length <= 0 else options.slice_length/2
+         trimLength = max(options.minIBDlength/2,0)
+         printerr("Breaking phase symmetries with the het after %dth SNP!"%(trimLength))
+         printerr("Broke phase symmetry for %d individuals"%(rlp.breakPhaseSymmetry(trimLength)))
+
          if options.ibdFile is not None:
             printerr("Reading ibd file",options.ibdFile)
             rlp.loadIBD( options.ibdFile )
@@ -3021,11 +3117,23 @@ if __name__ == "__main__":
 
 
       rlp.set_slice_len(options.slice_length)
-      if options.iterations>0:
-         if options.useMPI:
-            rlp.phaseMPI(iterations = options.iterations )
-         else:
-            rlp.phase(iterations = options.iterations, intFADbase = intFAD, intIBDbase = intIBD)
+
+      if options.useMPI:
+         assert rlp.haveIBD(), "The putative IBD finding is not implemented with MPI. Sorry."
+         #if self.__ibd is None:
+         #   self.phasePreProc(options.ibdSegmentCalls)
+         rlp.phaseMPI(iterations = options.iterations )
+      else:
+         if not rlp.haveIBD():
+            rlp.phasePreProc(options.ibdSegmentCalls)
+         if options.ibdCoverLimit > 0:
+            printerr("Filtering IBD segments to coverage of about %d"%(options.ibdCoverLimit))
+            addC,skipC,cover = rlp.filterIBDcover( options.ibdCoverLimit, options.minIBDlength)
+            printerr("Skipped %d/%d = %g%% putative IBD segments"%(skipC,addC+skipC, skipC*100.0/(addC+skipC)))
+            printerr("Mean IBD coverage per site: %g"%(cover.sum(axis=2).mean()))
+         rlp.phase(iterations = options.iterations,
+                   intFADbase = intFAD,
+                   intIBDbase = intIBD)
 
       if mpi_rank == 0:
          printerr("Writing output FAD to",options.outFile)
@@ -3044,3 +3152,9 @@ if __name__ == "__main__":
             rlp.writeLike(options.likeFile)
 
 #  LocalWords:  printerr
+   
+
+if __name__ == "__main__":
+
+
+   main()
