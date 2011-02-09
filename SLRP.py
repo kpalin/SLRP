@@ -2818,6 +2818,7 @@ class longRangePhase:
 
          allocedIBD = numpy.hstack( [allocedIBD, newIBD] )
          newIBD = None
+         printerr("RSS after stacking: %g GB"%(resident()*2.0**(-30)))
 
          if len(allocedIBD) == 0:
             # Skip to next slice if there are no IBD segments to analyse
