@@ -31,7 +31,11 @@ import signal
 
 import handythread
 
-
+try:
+   from meminfo import resident
+except ImportError:
+   def resident(since=0.0):
+      return 0
 
 
 
@@ -424,7 +428,6 @@ try:
          recvReqs = []
          workersGoing = range(1,worldSize)
          while len(self.requests) > 0 :
-            #pdb.set_trace()
             # This should loadbalance the workers
             recv_count,recv_indices = MPI.Request.Waitsome(self.requests)
             #printerr("Sending data to workers %s"%(", ".join(str(workersGoing[x]) for x in recv_indices)))
@@ -792,7 +795,7 @@ class longRangePhase:
       fline = fadFile.readline().strip().split()
       self.indivs = len(fline[1]) / 2
 
-      #pdb.set_trace()
+
       self.fad = numpy.loadtxt(fadFileName,dtype = [ ("pos",">i8"), ("haplos","|S%d"%(self.indivs*2) )] )
       self.snpPos = self.fad["pos"]
       self.snpCMpos =  self.snpPos * self.__mean_recomb_rate
@@ -864,7 +867,7 @@ class longRangePhase:
           #           -(numpy.log(0.5)+numpy.log(1-0.5)), -2*numpy.log(1-0.5)]
 
           missing = [ 0.0, 0.0, 0.0, 0.0 ]
-          #pdb.set_trace()
+
           #self.hLike[:,snpID,:]=numpy.array([ self.logG.get(int(g),missing) for i,g in enumerate(genos) if i%2==0])
 
           genos_pairs = ( genos[i:i+2] for  i in range(0,len(genos),2) )
@@ -874,7 +877,7 @@ class longRangePhase:
 
           #genos_pairs=list(genos_pairs)
           #print list(it.chain(*(self.logG_part.get(g,missing) for g in genos_pairs)))
-          #pdb.set_trace()
+
           self.hLike[:,snpID,:] = numpy.fromiter(it.chain(*(self.logG_part.get(g,missing) for g in genos_pairs)),
                                                  count = len(genos)*2, dtype = self.dataType).reshape(self.hLike[:,snpID,:].shape)
 
@@ -890,12 +893,12 @@ class longRangePhase:
 #                                     -(numpy.log(pf)+numpy.log(1-pf)), -2*numpy.log(1-pf)], dtype = self.dataType)
 #           diploPrior -= diploPrior.min()
 #           #print diploPrior
-#           #pdb.set_trace()
+
 #           #print self.hLike[:,snpID,:]
 #           self.hLike[:,snpID,:] += numpy.tile(diploPrior, (self.hLike.shape[0],1))
 # Finished  Wed Oct 06 11:31:32 BST 2010 
 
-          #pdb.set_trace()
+
           
       self.hLike = self.hLike.view(ndarray_ADD)
 
@@ -949,7 +952,7 @@ class longRangePhase:
       max_belief = ca2p[:,1:len_ij+1] + ca2pP[:,0:len_ij]
       
       norm_belief = normalize_beliefs(max_belief)
-      #      pdb.set_trace()
+
       with self.__pylab_lock:
          if fname is not None:
             printerr("Using matplotlib backend AGG.")
@@ -957,7 +960,7 @@ class longRangePhase:
             matplotlib.use("AGG")
          import pylab
          pylab.figure()
-         #pdb.set_trace()
+
          pylab.plot(self.snpCMpos[beginM:endM + 1], norm_belief[0,:],
                     self.snpCMpos[beginM:endM + 1], norm_belief[1,:],
                     self.snpCMpos[beginM:endM + 1], norm_belief[2,:],
@@ -1100,7 +1103,7 @@ class longRangePhase:
 
 
 
-      #pdb.set_trace()
+
       #self.zeroAF[0]=0.25
       def TESTBIT(x,b):
           return (x&(1<<b))
@@ -1161,11 +1164,11 @@ class longRangePhase:
 #       lastCol = 1 - tmp_CPT.sum(axis=2)
       
 #       self.CPT = numpy.dstack((tmp_CPT,lastCol))
-#       #pdb.set_trace()
+
 
       alt_CAj = numpy.tile(alt_CAj,(1,5,1,1,1))
       assert numpy.allclose(alt_CAj.sum(axis=4).sum(axis=3),1.0)
-      #pdb.set_trace()
+
       
       self.CPT.shape = (-1,5,5,1,1)
       self.CPT = numpy.tile(self.CPT,(1,1,1,4,4))
@@ -1222,7 +1225,7 @@ class longRangePhase:
 
       assert numpy.allclose(numpy.exp(-self.CPT[1:,]).sum(axis=2),1.0)
 
-      #pdb.set_trace()
+
       
 
 
@@ -1337,7 +1340,6 @@ class longRangePhase:
 
       self.__ibdSegmentsToIBD()
       self.__waitIBD()
-      #pdb.set_trace()
 
       for ind1,ind2,score,beginM,endM,beginBP,endBP in self.__ibd:
         if score >= scoreLimit:
@@ -1351,7 +1353,6 @@ class longRangePhase:
 
       self.__ibdSegmentsToIBD()
       self.__waitIBD()
-      #pdb.set_trace()
 
       for ind1,ind2,score,beginM,endM,beginBP,endBP in self.__ibd:
         if score >= scoreLimit:
@@ -1656,7 +1657,7 @@ class longRangePhase:
       #TODO: Move more stuff to C
       hLike1 = self.hLike[ind1/2,beginM:endM+1,:].view(numpy.ndarray)
       hLike2 = self.hLike[ind2/2,beginM:endM+1,:].view(numpy.ndarray)
-      #pdb.set_trace()
+
       if doUpdate:
          h12ca = hLike1 - ca2h1[:endM-beginM+1,:]
          h22ca = hLike2 - ca2h2[:endM-beginM+1,:]
@@ -1851,7 +1852,7 @@ class longRangePhase:
       if serializedPass:
          self.__lock_inlining()
       #printerr("X")   
-      #pdb.set_trace()
+
       # Nasty formatting 
       endM = int(endM)
       beginM = int(beginM)
@@ -1882,7 +1883,7 @@ class longRangePhase:
 
             
          checkit()
-         #pdb.set_trace()
+
 
 
       #if bt[4,beginM+1:endM+2].min()<4:
@@ -1926,10 +1927,9 @@ class longRangePhase:
             
          self.visualiseP(ind1,ind2,beginM,endM,fname = "ind%d-%d-marker-%d-%d-i%d.png"%(ind1,ind2,beginM,endM,self.__iter_counter[(ind1,ind2,beginM,endM)]))
 
-         #pdb.set_trace()
+
 
       #if endM >= 7504 and "2" in (self.fad[endM][1][ind1], self.fad[endM][1][ind2]):
-      #   pdb.set_trace()
       # Testing ends
 
       meanSqrD=0.0
@@ -1959,7 +1959,6 @@ class longRangePhase:
          #if self.myRank == 2:
          #   hLike1_new =  self.hLike[ind1/2,beginM:endM+1,:]
          #   diff = hLike1_new - (hLike1 + ca2h1_delta)
-         #   pdb.set_trace()
 
             
 
@@ -1993,7 +1992,6 @@ class longRangePhase:
          except AttributeError :
             self.fCount=1
          #sys.stderr.write("Need to test this!! Should usually give 4, possibly sometimes something else! Now %d. (%dth case out of %d)\n"%(firstP,self.fCount,self.cCount))
-         #pdb.set_trace()
 
 
 
@@ -2014,7 +2012,6 @@ class longRangePhase:
 
       if rPcalls[0]!=4 and rPcalls[1]==4: # Only one non 4 state:
          printerr("Nasty one marker IBD segment at %d"%(beginM))
-         #pdb.set_trace()
 
 
       return it.chain(it.repeat(4,beginM),pCalls,it.repeat(4,self.markers-1-endM))
@@ -2032,7 +2029,6 @@ class longRangePhase:
       segLast=endM-beginM
       # Probabilities of the last state
       #pProbs=(self.__assist.ca2p[:,segLast]+self.__assist.cp2pN[:,segLast]+self.CPj[endM,:,4])
-      #pdb.set_trace()
       pProbs = self.__assist.ca2p[:,segLast+1] #+ self.__assist.cp2pP[:,segLast]
       try:
          self.cCount+=1
@@ -2050,7 +2046,6 @@ class longRangePhase:
          except AttributeError :
             self.fCount=1
          #sys.stderr.write("Need to test this!! Should usually give 4, possibly sometimes something else! Now %d. (%dth case out of %d)\n"%(firstP,self.fCount,self.cCount))
-         #pdb.set_trace()
 
 
 
@@ -2070,7 +2065,6 @@ class longRangePhase:
             p=self.__assist.backtrack[p,i]
             i-=1
          if curState<4:
-            #if firstP!=4 and endM==self.markers-1: pdb.set_trace()
             r.append((h1[curState],h2[curState],i+1,endM))
             
       return r
@@ -2219,7 +2213,6 @@ class longRangePhase:
       numpy.savetxt(fname,self.hLike.reshape((self.hLike.shape[0],-1),order="C"),fmt="%g")
 
    def loadLike(self,fname):
-      #pdb.set_trace()
       myShape=self.hLike.shape[:]
       self.hLike=numpy.loadtxt(fname)
       self.hLike.shape=myShape
@@ -2329,7 +2322,6 @@ class longRangePhase:
       secondOne = numpy.logical_and(nLike[:,:,(2,3)].sum(axis=2) > callThresholdP, badCalls)
       firstZero = numpy.logical_and( nLike[:,:,(0,2)].sum(axis=2) > callThresholdP, badCalls)
       secondZero = numpy.logical_and(nLike[:,:,(0,1)].sum(axis=2) > callThresholdP, badCalls)
-      #pdb.set_trace()
       
       phases[firstOne,0]=1
       phases[secondOne,1]=1
@@ -2338,7 +2330,6 @@ class longRangePhase:
 
       #phasesG = phases2geno(phases)
       #fadAG = phases2geno(fadA)
-      #pdb.set_trace()
       outf.writelines("%d\t%s\n"%(pos,hl.tostring()) for pos,hl in zip(self.snpPos,phases+ord('0'))  )
 
 
@@ -2386,7 +2377,6 @@ class longRangePhase:
       ## Don't call heterozygotes that are within the added noise level from each other.
       #notPhased = (posCalls <3) & (posCalls >0 ) & ( ( self.hLike[:, :, 1:3].ptp(axis = 2) <= 10*self.maxNoise )  )
 
-      #pdb.set_trace()
 
 
       ibdCov = self.ibdCoverCounts()
@@ -2400,7 +2390,6 @@ class longRangePhase:
       defaultImputedSites = (ibdCov == 0) & (fadA == 3) 
       defaultHetSites = ( (numpy.repeat(defaultImputedSites[:,::2], 2, axis = 1) ) | (numpy.repeat(defaultImputedSites[:,1::2], 2, axis = 1)) )
 
-      #pdb.set_trace()
       #      phases[ defaultImputedSites ] = 3
       minGenoCov = numpy.dstack((ibdCov[..., 0::2], ibdCov[...,1::2]) ).min(axis=2)
 
@@ -2623,7 +2612,8 @@ class longRangePhase:
       if self.myRank == 0:
          ibdSegments = numpy.empty((0,4),dtype = numpy.int32)
       else:
-         ibdSegments = numpy.array(self.ibdSegments ,dtype = numpy.int32)
+         ibdSegments = numpy.array( list(self.ibdSegments) ,
+                                    dtype = numpy.int32)
          ibdSegments.shape = (-1,4)
       ibdSegments = self.Gather(ibdSegments, root = 0)
       self.ibdSegments = ibdSegments
@@ -2673,7 +2663,6 @@ class longRangePhase:
                                     dtype=numpy.uint32)
 
       self.__waitIBD()
-      #pdb.set_trace()
 
       ibdSequence = (self.__ibd[i] for i in segLengthDesc if self.__ibd["endM"][i]-self.__ibd["beginM"][i] +1 >= lenLimit)
 
@@ -2776,12 +2765,15 @@ class longRangePhase:
       for firstBase in range(0, self.markers, step_len):
          lastBase = firstBase + step_len
          #allocedIBD = []
+         printerr("RSS before allocations: %g GB"%(resident()*2.0**(-30)))
 
-         allocedIBD = allocedIBD[ allocedIBD["endMarker"] >= firstBase ]
+         allocedIBD = allocedIBD[ allocedIBD["endMarker"] > firstBase ]
          allocedIBD["lastMarkerFilled"] = numpy.minimum(lastBase, allocedIBD["endMarker"])
          allocedIBD["prevMeanSqrDiff"] = 1e99
 
 
+         if lastBase < self.markers:
+            printerr("RSS after passing wave: %g GB"%(resident()*2.0**(-30)))
 
 
 
@@ -2793,18 +2785,31 @@ class longRangePhase:
                                                (self.__ibd["endM"] - self.__ibd["beginM"] + 1) >= self.minIBDlength)
 
 
-         printerr( self.__ibd.shape, len(allocedIBD), self.minIBDlength,sum(toAllocIBDindicator))
+         printerr("Future allocation stats:", self.__ibd.shape, len(allocedIBD), self.minIBDlength,sum(toAllocIBDindicator))
 
+#          newIBD = numpy.array( [(int(x["ind1"] - x["ind1"] % 2),
+#                                  int(x["ind2"] - x["ind2"] % 2), 
+#                                  int(max(0, int(x["beginM"]) - 10)),
+#                                  int(min(self.markers-1, int(x["endM"]) + 10, lastBase)), 
+#                                  numpy.zeros((min(self.markers-1,x["endM"] + 10) - max(0, x["beginM"] - 10) + 1, 4), dtype = self.dataType),
+#                                  numpy.zeros((min(self.markers-1,x["endM"] + 10) - max(0, x["beginM"] - 10) + 1, 4), dtype = self.dataType),
+#                                  numpy.array([1e99], dtype = self.dataType),
+#                                  min(self.markers-1, int(x["endM"]) + 10 ) ) \
+#                                 for  x in self.__ibd[toAllocIBDindicator] ] ,
+#                                dtype = self.allocedIBD_dtype)
+
+         toAllocIBD = (self.__ibd[x] for x in toAllocIBDindicator.nonzero()[0])
          newIBD = numpy.array( [(int(x["ind1"] - x["ind1"] % 2),
-                                 int(x["ind2"] - x["ind2"] % 2), 
-                                 int(max(0, int(x["beginM"]) - 10)),
-                                 int(min(self.markers-1, int(x["endM"]) + 10, lastBase)), 
-                                 numpy.zeros((min(self.markers-1,x["endM"] + 10) - max(0, x["beginM"] - 10) + 1, 4), dtype = self.dataType),
-                                 numpy.zeros((min(self.markers-1,x["endM"] + 10) - max(0, x["beginM"] - 10) + 1, 4), dtype = self.dataType),
-                                 numpy.array([1e99], dtype = self.dataType),
-                                 min(self.markers-1, int(x["endM"]) + 10 ) ) \
-                                for  x in self.__ibd[toAllocIBDindicator] ] ,
-                               dtype = self.allocedIBD_dtype)
+                                    int(x["ind2"] - x["ind2"] % 2), 
+                                    int(max(0, int(x["beginM"]) - 10)),
+                                    int(min(self.markers-1, int(x["endM"]) + 10, lastBase)), 
+                                    numpy.zeros((min(self.markers-1,x["endM"] + 10) - max(0, x["beginM"] - 10) + 1, 4), dtype = self.dataType),
+                                    numpy.zeros((min(self.markers-1,x["endM"] + 10) - max(0, x["beginM"] - 10) + 1, 4), dtype = self.dataType),
+                                    numpy.array([1e99], dtype = self.dataType),
+                                    min(self.markers-1, int(x["endM"]) + 10 ) ) \
+                                   for  x in toAllocIBD ] ,
+                                  dtype = self.allocedIBD_dtype)
+         printerr("RSS after allocations: %g GB"%(resident()*2.0**(-30)))
 
 
 
@@ -2819,7 +2824,7 @@ class longRangePhase:
             continue
 
 
-         printerr("Allocated %gMB for %d IBD regions overlapping markers %d - %d"%( sum(x[4].nbytes+x[5].nbytes+x[6].nbytes for x in allocedIBD) * 1.0 / 2.0**20,
+         printerr("Allocated %gGB for %d IBD regions overlapping markers %d - %d"%( sum(x[4].nbytes+x[5].nbytes+x[6].nbytes for x in allocedIBD) * 1.0 / 2.0**30,
                                                                                     len(allocedIBD), firstBase, lastBase) )
 
          if self.poolSize <= 1 :
@@ -2832,7 +2837,9 @@ class longRangePhase:
          ibd_segment_cache.update(self.ibdSegments)
       else:
          pass
-      self.ibdSegments = list(ibd_segment_cache)
+      #self.ibdSegments = list(ibd_segment_cache)
+      self.ibdSegments = None
+      self.ibdSegments = ibd_segment_cache
 
 
 
@@ -2997,7 +3004,7 @@ def process_args():
       random.seed(options.seed)
 
    return options
-      
+
 
 def main():
    "Main function for long range phasing. Just to encapsulate the global variables."
@@ -3130,7 +3137,15 @@ def main():
             printerr("Filtering IBD segments to coverage of about %d"%(options.ibdCoverLimit))
             addC,skipC,cover = rlp.filterIBDcover( options.ibdCoverLimit, options.minIBDlength)
             printerr("Skipped %d/%d = %g%% putative IBD segments"%(skipC,addC+skipC, skipC*100.0/(addC+skipC)))
-            printerr("Mean IBD coverage per site: %g"%(cover.sum(axis=2).mean()))
+            cover = cover.sum(axis=2)
+            printerr("Mean IBD coverage per site: %g"%(cover.mean()))
+            percs = numpy.percentile( cover, [0.0, 25.0, 50.0, 75.0, 100.0])
+            printerr("IBD coverage quartiles per site:",", ".join("%g"%(x) for x in percs))
+            if options.ibdSegmentCalls is not None:
+               fibd_name = options.ibdSegmentCalls+".f%dibd"%(options.ibdCoverLimit)
+               printerr("Writing included putative IBD segments to %s."%(fibd_name))
+               rlp.writeIBD(fibd_name)
+
          rlp.phase(iterations = options.iterations,
                    intFADbase = intFAD,
                    intIBDbase = intIBD)

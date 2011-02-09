@@ -36,6 +36,7 @@ python-2.7  ${HOME}/Kuusamo/scripts/devel/SLRP/SLRP.py   \
     --outFile=${OUTFAD}x  \
     --ibdSegCalls=${OUTIBD} \
     --ibdFile=apu.aibd \
+    --slice_length=1000 --float \
     --iterations=20 --IBDcoverLimit=1
 
 
