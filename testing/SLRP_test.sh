@@ -36,8 +36,7 @@ python-2.7  ${HOME}/Kuusamo/scripts/devel/SLRP/SLRP.py   \
     --outFile=${OUTFAD}x  \
     --ibdSegCalls=${OUTIBD} \
     --ibdFile=apu.aibd \
-    --slice_length=1000 --float \
-    --iterations=20 --IBDcoverLimit=1
+    --iterations=1 --IBDcoverLimit=1
 
 
 #${INFAD} \
@@ -45,3 +44,4 @@ python-2.7  ${HOME}/Kuusamo/scripts/devel/SLRP/SLRP.py   \
 #    --ibdFile=/lustre/scratch103/sanger/kp5/Suomi/genotypes/NFBC/phase-2011-02-04/NFBC.chr${LSB_JOBINDEX}.ibd.aibd \
 #   --ibdFile=
 #    --ibdFile=test_NFBC.chr${LSB_JOBINDEX}.ibd.aibd \
+#    --slice_length=1000 --float \

@@ -814,15 +814,16 @@ class longRangePhase:
 
    def breakPhaseSymmetry(self, trimLength=0):
       "Break symmetries on individuals that don't have any phase information from FAD file. Set one of the heterozygotes after beginning of the ibdSegments to phased state."
+      assert self.hLike is not None, "Likelihood table must be set up before breaking symmetries. Use initMessages()"
+
       indivsWithoutPhase = numpy.where(self.haplos.var(axis=2).max(axis=0) == 0.0)[0]
+      breakableSNPs = numpy.where(self.haplos[trimLength:,:,0].transpose()==2)
+      break_marker_indiv = numpy.array([hets.next() for (i,hets) in it.groupby(it.izip(*breakableSNPs),lambda x:x[0])],dtype=int)
+      break_marker_indiv[:,1]+=trimLength
+      
+      mask = numpy.in1d(break_marker_indiv[:,0], indivsWithoutPhase)
 
-      breakableSNPs = numpy.where(self.haplos[trimLength:,:,0]==2)
-
-      _,idx = numpy.unique(breakableSNPs[1],return_index=True)
-      breakableSNPs = (breakableSNPs[0][idx],breakableSNPs[1][idx])
-      mask = numpy.in1d(breakableSNPs[1], indivsWithoutPhase)
-      self.haplos[breakableSNPs[0][mask]+trimLength,breakableSNPs[1][mask]] = [0,1]
-
+      self.hLike[break_marker_indiv[mask,0], break_marker_indiv[mask,1]] = self.logG_part["01"]
       return sum(mask)
 
    def __setLikelihoods(self):
@@ -2237,27 +2238,8 @@ class longRangePhase:
       "Write current haplotypes to file fname in FAD format"
       self.writeFADstrm(open(fname,"w"))
 
-   def writeFADstrmOldie(self,outf):
-      "Call haplotypes from current likelihoods and write to file fname in FAD format"
-      idx2phase=[("0", "0"), ("1", "0"), ("0", "1"), ("1", "1")]
-
-      def like2geno(like):
-           gp=like.argmin()
-           if 0<gp<3 and abs(like[1]-like[2])< 2*self.maxNoise:
-               return ("2","2")
-
-
-           return idx2phase[gp]
-
-
-      ibdCov = self.ibdCoverCounts()
-      for j,pos in enumerate(self.snpPos):
-           h=list( it.chain( *(like2geno(self.hLike[ind,j,:]) for ind in xrange(self.indivs)) ) )
-           #ibdCov[j,:]
-           outf.write("%d\t%s\n"%(pos,"".join(h)))
-
    def normalizedLike(self):
-      "Return normalized max-margin posteriors ('likelihoods') in range [0-9]"
+      "Return normalized max-margin posteriors ('likelihoods') in range [0-1]"
       tlike = numpy.exp(-self.hLike).transpose((2,0,1))
       tlike /= tlike.sum(axis=0)
       tlike = tlike.transpose((1,2,0))
@@ -2268,19 +2250,6 @@ class longRangePhase:
       "Call haplotypes from current likelihoods and write to file fname in FAD format"
       idx2phase = numpy.array([(0, 0), (1, 0), (0, 1), (1, 1), (2, 2)], dtype = numpy.int8)
 
-      def phases2geno(ph):
-         geno = ph[:,:,0] + ph[:,:,1]
-         # Phased hets
-         geno[geno == 1 ] = 4
-         # One missing
-         geno[ (ph[:,:,0] == 3) | (ph[:,:,1] == 3) ] = 6
-
-         # Move to same coding as in fad file
-         geno /= 2
-         
-         return geno
-
-
       # Call most likely phase:
       # 0 = 00
       # 1 = 10
@@ -2288,133 +2257,50 @@ class longRangePhase:
       # 3 = 11
       posCalls = self.hLike.argmin(axis=2)
 
-      # Use heuristically reached cutoff:
-      #notPhased = (posCalls <3) & (posCalls >0 ) & ( ( self.hLike[:, :, 1:3].ptp(axis = 2) <= numpy.log(self.callThreshold) )  )
-
-      ibdCovO = self.ibdCoverCounts()
-      ibdCovO.shape=(self.markers,2,-1)
-      ibdCovO = ibdCovO.transpose((0,2,1)) # ibdCov.shape == (markers,indivs,2)
-      ibdCov = self.ibdCoverCounts2()
-
-      nLike = self.normalizedLike().transpose((1,0,2))  # nLike.shape == (markers,indivs,4)
-
-      fadA = numpy.array([ numpy.fromstring(x, sep="", dtype=numpy.int8) for x in self.fad["haplos"] ] , dtype = numpy.int8) - ord('0')
-      fadA.shape = (self.markers,-1,2)  # = (markers,indivs,2)
 
 
 
-      phases = numpy.array(idx2phase[posCalls]).transpose((1,0,2)).copy()
+      #fadA = numpy.array([ numpy.fromstring(x, sep="", dtype=numpy.int8) for x in self.fad["haplos"] ] , dtype = numpy.int8) - ord('0')
+      #fadA.shape = (self.markers,-1,2)  # = (markers,indivs,2)
+
+
+
+      phases = numpy.array(idx2phase[posCalls]).transpose((1,0,2))
       phases.shape = (self.markers, -1, 2) # = (markers,indivs,2)
 
 
       callThresholdP = self.callThreshold / (1.0 + self.callThreshold)
 
+      nLike = self.normalizedLike().transpose((1,0,2))  # nLike.shape == (markers,indivs,4)
       # Places where we cant make reliable full calls:
       badCalls = nLike.max(axis=2) < callThresholdP
 
-      phases[ badCalls  ] = fadA[badCalls]
+      phases[ badCalls  ] = self.haplos[badCalls]
 
 
       # Places where we didnt *impute* a full genotype
-      badCalls = numpy.logical_and(badCalls, fadA[:,:,0] == 3)
+      badCalls = numpy.logical_and(badCalls, self.haplos[:,:,0] == 3)
 
       firstOne = numpy.logical_and( nLike[:,:,(1,3)].sum(axis=2) > callThresholdP, badCalls)
-      secondOne = numpy.logical_and(nLike[:,:,(2,3)].sum(axis=2) > callThresholdP, badCalls)
-      firstZero = numpy.logical_and( nLike[:,:,(0,2)].sum(axis=2) > callThresholdP, badCalls)
-      secondZero = numpy.logical_and(nLike[:,:,(0,1)].sum(axis=2) > callThresholdP, badCalls)
-      
       phases[firstOne,0]=1
+      del(firstOne)
+      
+      secondOne = numpy.logical_and(nLike[:,:,(2,3)].sum(axis=2) > callThresholdP, badCalls)
       phases[secondOne,1]=1
+      del(secondOne)
+      
+      firstZero = numpy.logical_and( nLike[:,:,(0,2)].sum(axis=2) > callThresholdP, badCalls)
       phases[firstZero,0]=0
+      del(firstZero)
+      
+      secondZero = numpy.logical_and(nLike[:,:,(0,1)].sum(axis=2) > callThresholdP, badCalls)      
       phases[secondZero,1]=0
-
-      #phasesG = phases2geno(phases)
-      #fadAG = phases2geno(fadA)
-      outf.writelines("%d\t%s\n"%(pos,hl.tostring()) for pos,hl in zip(self.snpPos,phases+ord('0'))  )
-
-
-
-   def writeFADstrmCurrent(self,outf):
-      "Call haplotypes from current likelihoods and write to file fname in FAD format"
-      idx2phase=[(0, 0), (1, 0), (0, 1), (1, 1), (2, 2)]
-
-      def phases2geno(ph):
-         geno = ph[:,::2] + ph[:,1::2]
-         # Phased hets
-         geno[geno == 1 ] = 4
-         # One missing
-         geno[ (ph[:,::2] == 3) | (ph[:,1::2] == 3) ] = 6
-
-         # Move to same coding as in fad file
-         geno /= 2
-         
-         return geno
-
-
-
-#      def like2geno(like):
-#           gp=like.argmin()
-   #        if 0<gp<3 and (abs(like[1]-like[2])<1.0 or min(like)>1.0): ## switch error ~5
-#           #if 0<gp<3 and (abs(like[1]-like[2])<5.0): ## switch error  ~6
-#           if 0<gp<3 and (abs(like[1]-like[2])<5.0 or min(like[1:3])>1.0): ## switch error  ~4
-           #if 0<gp<3 and  min(like)>1.0:  ## Switch Error ~20
-#               return idx2phase[4]
-
-
-#           return idx2phase[gp]
-
-      # Call most likely phase:
-      # 0 = 00
-      # 1 = 10
-      # 2 = 01
-      # 3 = 11
-      posCalls = self.hLike.argmin(axis=2)
-      #notPhased = (posCalls <3) & (posCalls >0 ) & ( ( self.hLike[:, :, 1:3].ptp(axis = 2) <2.0/numpy.log(10) ) | ( self.hLike.min(axis = 2) > 1.0 ) )
-
-      # Use heuristically reached cutoff:
-      notPhased = (posCalls <3) & (posCalls >0 ) & ( ( self.callQual() <= numpy.log(self.callThreshold) )  )
-
-      ## Don't call heterozygotes that are within the added noise level from each other.
-      #notPhased = (posCalls <3) & (posCalls >0 ) & ( ( self.hLike[:, :, 1:3].ptp(axis = 2) <= 10*self.maxNoise )  )
-
-
-
-      ibdCov = self.ibdCoverCounts()
-
-#      phases = numpy.fromiter( it.chain( *(like2geno(self.hLike[ind,j,:]) for j in range(self.markers) for ind in xrange(self.indivs) ) ),
-#                         dtype = numpy.int8 )
-#      phases.shape = (self.markers, 2 * self.indivs)
-
-      fadA = numpy.array([ numpy.fromstring(x, sep="", dtype=numpy.int8) for x in self.fad["haplos"] ] , dtype = numpy.int8) - ord('0')
-
-      defaultImputedSites = (ibdCov == 0) & (fadA == 3) 
-      defaultHetSites = ( (numpy.repeat(defaultImputedSites[:,::2], 2, axis = 1) ) | (numpy.repeat(defaultImputedSites[:,1::2], 2, axis = 1)) )
-
-      #      phases[ defaultImputedSites ] = 3
-      minGenoCov = numpy.dstack((ibdCov[..., 0::2], ibdCov[...,1::2]) ).min(axis=2)
-
-      # TESTING:
-      #raise "TEST"
-      idx2phase = numpy.array(idx2phase, dtype = numpy.int8)
-      phases = numpy.array(idx2phase[posCalls]).transpose((1,0,2)).copy()
-      phases.shape = (self.markers, -1)
-
-
-      phases[ numpy.repeat(notPhased, 2, axis = 0).transpose()  ] = 2
-              
-      phases[ defaultHetSites & (phases == 2) ] = 3
-      phases[ defaultImputedSites ] = 3
-
-
-      # Require support for both alleles to 
-      newG = phases2geno(phases)
-
-      go_with_obs = ( (newG != fadA[:,::2] ) & (fadA[:,::2] < 3) ) & ( minGenoCov == 0 )
-      go_with_obs = numpy.repeat(go_with_obs, 2, axis=1)
-      printerr("Going with obs:",go_with_obs.sum())
-      phases[go_with_obs] = fadA[go_with_obs]
+      del(secondZero)
 
       outf.writelines("%d\t%s\n"%(pos,hl.tostring()) for pos,hl in zip(self.snpPos,phases+ord('0'))  )
+
+
+
 
    def Gather(self, sendbuf, root = 0):
       "Gathers arbitrary size numpy arrays from non root processes"
@@ -2826,9 +2712,9 @@ class longRangePhase:
 
 
          printerr("Allocated %gGB for %d IBD regions overlapping markers %d - %d"%( sum(x[4].nbytes+x[5].nbytes+x[6].nbytes for x in allocedIBD) * 1.0 / 2.0**30,
-                                                                                    len(allocedIBD), firstBase, lastBase) )
+                                                                                    len(allocedIBD), firstBase, min(self.markers, lastBase) ))
 
-         if self.poolSize <= 1 :
+         if self.poolSize <= 1:
             self.iterateOverIBD(allocedIBD,iterations,intermedFAD=intFADbase,intermedIBD=intIBDbase)
          else:
             # Threading
@@ -3081,13 +2967,9 @@ def main():
          rlp.setCallThreshold(options.callThreshold)
          printerr("Reading fad %s"%(options.fadFile))
          rlp.loadFAD( options.fadFile )
-         printerr("Read FAD!")
+         printerr("Read FAD for %d individuals and %d markers!",rlp.indivs,rlp.markers)
 
 
-         #trimLength = rlp.markers/2 if options.slice_length <= 0 else options.slice_length/2
-         trimLength = max(options.minIBDlength/2,0)
-         printerr("Breaking phase symmetries with the het after %dth SNP!"%(trimLength))
-         printerr("Broke phase symmetry for %d individuals"%(rlp.breakPhaseSymmetry(trimLength)))
 
          if options.ibdFile is not None:
             printerr("Reading ibd file",options.ibdFile)
@@ -3122,6 +3004,10 @@ def main():
             printerr("Loading initial likelihoods from",options.loadLikelihoods)
             rlp.loadLike(options.loadLikelihoods)
             
+         #trimLength = rlp.markers/2 if options.slice_length <= 0 else options.slice_length/2
+         trimLength = max(options.minIBDlength/2,0)
+         printerr("Breaking phase symmetries with the het after %dth SNP!"%(trimLength))
+         printerr("Broke phase symmetry for %d individuals"%(rlp.breakPhaseSymmetry(trimLength)))
 
 
       rlp.set_slice_len(options.slice_length)
@@ -3142,6 +3028,8 @@ def main():
             printerr("Mean IBD coverage per site: %g"%(cover.mean()))
             percs = numpy.percentile( cover, [0.0, 25.0, 50.0, 75.0, 100.0])
             printerr("IBD coverage quartiles per site:",", ".join("%g"%(x) for x in percs))
+            printerr("Sites with less than %d coverage: %g%%"%(options.ibdCoverLimit, (cover<options.ibdCoverLimit).mean()*100.0))
+            printerr("Sites with two or less  coverage: %g%%"%((cover<3).mean()*100.0))
             if options.ibdSegmentCalls is not None:
                fibd_name = options.ibdSegmentCalls+".f%dibd"%(options.ibdCoverLimit)
                printerr("Writing included putative IBD segments to %s."%(fibd_name))
