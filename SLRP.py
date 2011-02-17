@@ -2994,7 +2994,7 @@ def main():
          rlp.setCallThreshold(options.callThreshold)
          printerr("Reading fad %s"%(options.fadFile))
          rlp.loadFAD( options.fadFile )
-         printerr("Read FAD for %d individuals and %d markers!",rlp.indivs,rlp.markers)
+         printerr("Read FAD for %d individuals and %d markers!"%(rlp.indivs,rlp.markers))
 
 
 
