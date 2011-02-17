@@ -567,6 +567,33 @@ except NameError:
 
 
 
+def open(filename,mode="r",bufsize=-1):
+    "Open a file, which is possibly gzipped."
+    import gzip
+    import os
+    
+    from __builtin__ import open as bopen
+    if filename[-3:] == ".gz" or "r" in mode:
+        f = gzip.open(filename,mode,bufsize)
+
+        if "r" in mode:
+            try:
+                b = f.read(1)
+                f._unread(b)
+            except IOError,e:
+                if e.message == 'Not a gzipped file':
+                    f = bopen(filename,mode,bufsize)
+                else:
+                    raise
+    else:
+        f = bopen(filename,mode,bufsize)
+        
+
+    return f
+
+
+
+
 
 def reverse_enumerate(a):
     return ((len(a)-1-i, x) for i, x in enumerate(reversed(a)))
