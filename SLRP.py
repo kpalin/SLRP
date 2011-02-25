@@ -116,6 +116,14 @@ except ImportError ,e:
 
 
 
+def addSuffix(base,suffix):
+   "Append a suffix to the base such that .gz ending is kept last"
+   if base.endswith(".gz"):
+      out = base[:-3] + suffix.strip() + ".gz"
+   else:
+      out = base + suffix
+
+   return out
 
 
 
@@ -2647,7 +2655,7 @@ class longRangePhase:
                                   dtype = self.__ibd_dtype )
 
       if ibdSegmentCalls is not None:
-         open(ibdSegmentCalls+".aibd","w").writelines("%d\t%d\t%g\t%d\t%d\t%d\t%d\n"%(x[0],x[1],x[2],x[3],x[4],x[5],x[6]) for x in self.__ibd)
+         open(addSuffix(ibdSegmentCalls,".aibd"),"w").writelines("%d\t%d\t%g\t%d\t%d\t%d\t%d\n"%(x[0],x[1],x[2],x[3],x[4],x[5],x[6]) for x in self.__ibd)
          printerr("Max end",max(x[4] for x in self.__ibd))
 
 
@@ -2920,6 +2928,7 @@ def process_args():
    return options
 
 
+
 def main():
    "Main function for long range phasing. Just to encapsulate the global variables."
    options = process_args()
@@ -3058,7 +3067,7 @@ def main():
             printerr("Sites with less than %d coverage: %g%%"%(options.ibdCoverLimit, (cover<options.ibdCoverLimit).mean()*100.0))
             printerr("Sites with two or less  coverage: %g%%"%((cover<3).mean()*100.0))
             if options.ibdSegmentCalls is not None:
-               fibd_name = options.ibdSegmentCalls+".f%dibd"%(options.ibdCoverLimit)
+               fibd_name = addSuffix(options.ibdSegmentCalls, ".f%dibd"%(options.ibdCoverLimit) )
                printerr("Writing included putative IBD segments to %s."%(fibd_name))
                rlp.writeIBD(fibd_name)
 

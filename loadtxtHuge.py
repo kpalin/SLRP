@@ -10,6 +10,7 @@ from numpy.lib._compiled_base import packbits, unpackbits
 
 from numpy.lib._iotools import LineSplitter, NameValidator, StringConverter, \
                      _is_string_like, has_nested_fields, flatten_dtype
+from numpy.lib.npyio import seek_gzip_factory
 
 
 _file = file
