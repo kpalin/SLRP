@@ -631,40 +631,6 @@ except ImportError:
 
 
 
-class toIBDcall:
-   def __init__(self,pCalls):
-      self.pCalls=pCalls
-
-   def __iter__(self):
-      return self.next()
-
-   def next(self):
-      startM=0
-      for segLen,p in runlength_enc(self.pCalls):
-         if p==0:
-            haplo1=0
-            haplo2=0
-         elif p==1:
-            haplo1=1
-            haplo2=0
-         elif p==2:
-            haplo1=0
-            haplo2=1
-         elif p==3:
-            haplo1=1
-            haplo2=1
-         elif p==4:
-            pass
-         else:
-            assert False, "Don't come here"
-
-         if p!=4:
-            yield (haplo1,haplo2,startM,startM+segLen-1)
-         startM+=segLen
-      
-def firstAndLast(x_it):
-   x_it = iter(x_it)
-   return reduce(lambda old, new:(old[0], new), x_it, (x_it.next(),None))
 
 class ThreadBarrier:
    def __init__(self,n = 0):
@@ -3002,25 +2968,38 @@ def main():
 
          rlp.setCallThreshold(options.callThreshold)
          printerr("Reading fad %s"%(options.fadFile))
-         rlp.loadFAD( options.fadFile )
+         try:
+            rlp.loadFAD( options.fadFile )
+         except IOError,e:
+            printerr(str(e))
+            return False
          printerr("Read FAD for %d individuals and %d markers!"%(rlp.indivs,rlp.markers))
 
 
 
          if options.ibdFile is not None:
             printerr("Reading ibd file",options.ibdFile)
-            rlp.loadIBD( options.ibdFile )
+            try:
+               rlp.loadIBD( options.ibdFile )
+            except IOError,e:
+               printerr(str(e))
+               return False
+            
             printerr("Started to read IBD!")
 
          if options.ibdCover is not None:
             cov = rlp.ibdCoverCounts( options.scoreLimit )
             numpy.savetxt( options.ibdCover, cov, fmt="%d", delimiter="\t" )
-            sys.exit(0)
+            return True
 
 
          if options.geneticMap is not None:
             printerr("Reading genetic map")
-            rlp.loadGeneticMap( open(options.geneticMap) )
+            try:
+               rlp.loadGeneticMap( open(options.geneticMap) )
+            except IOError,e:
+               printerr(str(e))
+               return False
             printerr("Read genetic map!")
 
          rlp.initMessages( options.ExpectedIBS, options.ExpectedIBD, errP = options.errP )
@@ -3038,8 +3017,12 @@ def main():
 
          if options.loadLikelihoods is not None:
             printerr("Loading initial likelihoods from",options.loadLikelihoods)
-            rlp.loadLike(options.loadLikelihoods)
-            
+            try:
+               rlp.loadLike(options.loadLikelihoods)
+            except IOError,e:
+               printerr(str(e))
+               return False
+
          #trimLength = rlp.markers/2 if options.slice_length <= 0 else options.slice_length/2
          trimLength = max(options.minIBDlength/2,0)
          printerr("Breaking phase symmetries with the het after %dth SNP!"%(trimLength))
