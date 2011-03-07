@@ -16,11 +16,6 @@ from __future__ import with_statement
 
 
 
-__version__ = "$Revision: 1.2.2.12 $"
-
-
-
-print __version__
 
 import sys
 import random
@@ -152,7 +147,7 @@ try:
    import numpy
 except ImportError:
    printerr("Can not find the required numpy library!")
-   sys.exit(1)
+   raise
 
 # Improve the perfomance of loading huge text files.
 try:
@@ -182,6 +177,7 @@ try:
    mpi4py.rc.initialize = False
    from mpi4py import MPI
    import time
+   hasMPI = True
 
    class MPItagOutput(object):
 
@@ -538,7 +534,7 @@ try:
     
       
 except ImportError :
-   printerr("No MPI for you. Sorry!")
+   hasMPI = False
    pass
 
 
@@ -619,7 +615,6 @@ def nlogsumnexp(p,q):
     return -r
 
 
-printerr("Starting")
 
 try:
    from scipy import weave
@@ -627,8 +622,7 @@ try:
    import scipy.linalg
 except ImportError:
    printerr("Can not find the required scipy library!")
-   sys.exit(1)
-
+   raise
 
 
 
@@ -1045,13 +1039,6 @@ class longRangePhase:
                             [0,0,0,0,h],
                             [g,g,g,g,0]])
 
-#       s = self.ibd_prob * h/3
-#       assert h>3*s
-#       rateMat5=numpy.array([[0,s,s,s,h-3*s],
-#                             [s,0,s,s,h-3*s],
-#                             [s,s,0,s,h-3*s],
-#                             [s,s,s,0,h-3*s],
-#                             [g,g,g,g,0]])
 
       assert (rateMat5 >= 0).all()
       
@@ -1364,7 +1351,16 @@ class longRangePhase:
 
 
 
+#    def __computeOneIBDnoUpdate(self,indPairs):
+#       """Calculate putative IBD segments with a log likelihood approach. The likelihoods are
+#       taken from the HMM transition/emission table and depend on the genetic distances
+#       between the markers."""
 
+#       assert self.CPT[:,0,0,1:3,1:3].var(axis=1) == self.CPT[:,0,0,1:3,1:3].var(axis=2) == 0.0
+
+#       # LLtable[marker,genotype1, genotype2]
+#       LLtable = numpy.zeros( (self.markers,4,4) ) 
+#       self.CPT[:,0,0,1:3,1:3]
 
    def __computeOneIBDnoUpdate(self,indPairs):
       "Compute one forward message passing over pair of individuals on restricted region. Dont update likelihoods."
@@ -1417,7 +1413,7 @@ class longRangePhase:
 
             
             for(int iPair=0; iPair < total_pairs ; iPair++) {
-
+               // This should be made with iterators.
                ind1=indPairs[iPair][0];
                ind2=indPairs[iPair][1];
 
@@ -2617,7 +2613,8 @@ class longRangePhase:
          newTime = time.time()
       printerr( "All pairs took %g mins"%( ( time.time() - startTime ) / 60.0 ))
 
-      self.__ibd = numpy.fromiter(((ind1,ind2,stopM-startM+1,startM,stopM,self.snpPos[startM],self.snpPos[stopM]) for ind1,ind2,startM,stopM in ibdRegions),
+      self.__ibd = numpy.fromiter(((ind1,ind2,stopM-startM+1,startM,stopM,self.snpPos[startM],self.snpPos[stopM])
+                                   for ind1,ind2,startM,stopM in ibdRegions),
                                   dtype = self.__ibd_dtype )
 
       if ibdSegmentCalls is not None:
@@ -2732,352 +2729,3 @@ class longRangePhase:
 
 
             
-def process_args():
-   parser = optparse.OptionParser()
-
-   parser.add_option("-f", "--fadFile", dest="fadFile",
-                     help="Name of the genotype file in FAD format.  REQUIRED  [default:%default]",
-                     metavar="FILE"#,default="Kuusamo_370K_genotypes.hapMapIntersect.chr23.fad"
-                     )
-
-   parser.add_option("-o", "--outFile", dest="outFile",
-                     help="Name of the long range phased FAD output file  [default:%default]",
-                     metavar="FILE",default=None
-                     )
-
-
-   parser.add_option("-m", "--geneticMap", dest="geneticMap",
-                     help="Input file with the genetic map in hapmap format  [default:%default]",
-                     metavar="FILE",default=None
-                     )
-
-   parser.add_option("-S", "--ibdSegCalls", dest="ibdSegmentCalls",metavar="FILE",
-                     help="Output IBD segments between the indivdiduals to FILE  [default:%default]",
-                     default=None
-                     )
-
-   parser.add_option("-Q", "--outQualities", dest="outQualFile",metavar="FILE",
-                     help="Output quality scores for each site. The scores are negative base 10 log posterior probability ratios between the two phasings. (Makes no sense for homs)  [default:%default]",
-                     default=None
-                     )
-   parser.add_option("-T", "--CallThreshold", dest="callThreshold",metavar="NUM",
-                     help="Minimum fold difference in posterior probability of two most probable phases to be called.  [default:%default]",
-                     default=2.0,type="float"
-                     )
-
-
-   parser.add_option("-c", "--ibdCover", dest="ibdCover",
-                     help="Output the number of individuals sharing a trackt IBD.   [default:%default]",
-                     metavar="FILE",default=None
-                     )
-   
-   parser.add_option("-I", "--iterations", dest="iterations",type="int",
-                     help="Maximum number of iterations to run the message passing. Also end if no improvement over three loops [default:%default]",
-                     metavar="NUM",default=30)
-
-   parser.add_option("-d", "--damping", dest="dampF",type="float",
-                     help="Damping factor for message updates  [default:%default]", metavar="NUM",default=0.75)
-
-
-   parser.add_option("", "--ExpectedIBD", dest="ExpectedIBD",type="float",
-                     help="Expected length of an IBD segment (in centiMorgans) [default:%default]",
-                     metavar="NUM",default=10.0)
-   parser.add_option("", "--ExpectedIBS", dest="ExpectedIBS",type="float",
-                     help="Expected length of an non IBD IBS segment (in centiMorgans) [default:%default]",
-                     metavar="NUM",default=1.0)
-
-   parser.add_option("-p", "--prob_ibd", dest="prob_ibd",type="float",
-                     help="Probability of two haplotypes in the population to match  [default:%default]",
-                     metavar="NUM",default=0.01)
-   
-   parser.add_option("", "--IBDtransLimit", dest="IBDtransLimit",type="float",
-                     help="Upper limit for probability of noIBD to IBD transition between two markers.  Default taken from population probabililties. [default: 4 * prob_ibd]", metavar="NUM",default=None )
-
-
-
-   parser.add_option("", "--minIBDlength", dest="minIBDlength",type="int",
-                     help="Hard lower limit for length of IBD segment in markers. This should speed up computation by disregarding uninformative IBS segments. [default: %default]", metavar="NUM",default=20 )
-
-   parser.add_option("", "--IBDcoverLimit", dest="ibdCoverLimit",type="int",
-                     help="Soft lower limit for number of IBD sharing. Only do message passing on the longest NUM segments covering a locus. The selection is greedy, hence there might be more than minimum number of segments used. Non positive limits turn off this limit. [default: %default]", metavar="NUM",default=-1 )
-
-
-
-
-
-   parser.add_option("-e", "--genotypingErrRate", dest="errP",type="float",
-                     help="Estimated genotyping error rate  [default:%default]", metavar="NUM",default=1e-3)
-
-
-   parser.add_option("-n", "--procs", dest="numProcs",type="int",
-                     help="Number of processors to use in parallel  [default:%default]", metavar="NUM",default=1)
-
-
-   parser.add_option("", "--seed", dest="seed",type="int",
-                     help="Seed for random number generator  [default:%default]", metavar="NUM",default=None)
-
-   parser.add_option("", "--slice_length", dest="slice_length",type="int",
-                     help="Length of alignment slice in markers (to save memory)  [default:%default]", metavar="NUM",default=-1)
-
-
-   parser.add_option("-i", "--ibdFile", dest="ibdFile",
-                     help="Name of the input IBD file  [default:%default]",
-                     metavar="FILE",default=None
-                     )
-   
-   parser.add_option("-l", "--scoreLim", dest="scoreLimit",type="float",
-                     help="Minimum score above which to use the IBD matches loaded from a file [default:%default]", metavar="NUM",default=0.0)
-
-
-   parser.add_option("-F", "--full", dest="fullIBD",action="store_true",
-                     help="Run the full all-pairs analysis (warning: not tested and needs huge memory)  [default:%default]",
-                     default=False
-                     )
-
-   parser.add_option("", "--float", dest="useFloat32",action="store_true",
-                     help="Use floats, instead of doubles. Saves half the memory but might affect numerical precision and stability.  [default:%default]",
-                     default=False
-                     )
-
-
-
-   parser.add_option("-L", "--likeFile", dest="likeFile",
-                     help="Name of the file for final MAP values as negative natural logarithm  [default:%default]",
-                     metavar="FILE",default=None
-                     )
-
-   parser.add_option("", "--loadLikelihoods", dest="loadLikelihoods",
-                     help="Load initial likelihoods from a file (Probably a quite insensible thing to do) [default:%default]",
-                     metavar="FILE",default=None
-                     )
-
-
-
-
-
-   parser.add_option("", "--test", dest="test",action="store_true",
-                     help="Activate some testing thingies  [default:%default]",
-                     default=False
-                     )
-
-   parser.add_option("-A", "--intermediate", dest="saveIntermediate",action="store_true",
-                     help="Save intermediate FAD and IBD files  [default:%default]",
-                     default=False
-                     )
-
-   parser.add_option("-M", "--mpi", dest="useMPI",action="store_true",
-                     help="Use MPI to distribute the computational and memory load  [default:%default]",
-                     default=False
-                     )
-
-
-
-   (options, args) = parser.parse_args()
-
-   if options.fadFile is None:
-      printerr("Input FAD file needed. Sorry!")
-      parser.print_help()
-      sys.exit()
-
-   
-   assert(0<=options.dampF<1)
-
-
-   printerr("Using options:")
-   writeOptions(options,outstrm=sys.stderr)
-
-   if options.seed is not None:
-      printerr("Setting random seed to %d. The run is deterministic!!"%(options.seed))
-      numpy.random.seed(options.seed)
-      random.seed(options.seed)
-
-   return options
-
-
-
-def main():
-   "Main function for long range phasing. Just to encapsulate the global variables."
-   options = process_args()
-   global printerr
-
-
-
-   if False and options.outFile is None:
-      printerr("Nothing to store, nothing to do..")
-   else:
-      if options.useFloat32:
-         printerr("Danger!! Using single precision floats!")
-         myDataType = numpy.float32
-      else:
-         myDataType = numpy.float64
-      rlp = longRangePhase(dType = myDataType)
-
-      rlp.setDamping(options.dampF)
-      rlp.setIBDprob(options.prob_ibd)
-      #rlp.set_mutation_rate(options.scaled_mutation_rate)
-      if options.IBDtransLimit is not None:
-         rlp.set_ibd_transition_limit(options.IBDtransLimit)
-      else:
-         rlp.set_ibd_transition_limit(4 * options.prob_ibd)
-
-      rlp.set_min_ibd_length(options.minIBDlength)
-      
-      mpi_size,mpi_rank,mpi_name=0,0,""
-      if options.useMPI:
-         from mpi4py import MPI
-         MPI.Init_thread()
-         
-
-         printerr = MPItagOutput(printerr)
-         printerr("MPI Initialized:", MPI.Is_initialized())
-         printerr("Level of thread support:", MPI.Query_thread() )
-         printerr("MPI vendor:", MPI.get_vendor() )
-
-         assert MPI.Query_thread() > 0 or options.num_procs == 1, "This MPI implementation does not allow multithreaded commands."
-         
-         mpi_size = MPI.COMM_WORLD.Get_size()
-         mpi_rank = MPI.COMM_WORLD.Get_rank()
-         mpi_name = MPI.Get_processor_name()
-
-
-
-         def mpiExceptHook(err_type, value, tb):
-            sys.__excepthook__(err_type, value, tb)
-            likeName = "longRangePhaseMPI.like." + MPI.Get_processor_name()
-            sys.stderr.write("Exception in %s process %d\n"%(MPI.Get_processor_name(), MPI.COMM_WORLD.Get_rank() ))
-            #sys.stderr.write("Trying to write likelihoods to %s\n"%( likeName ))
-            
-            #self.writeLike(likeName)
-            #sys.stderr.write("Succeeded. Hurray!\n")
-            MPI.COMM_WORLD.Abort()
-            
-         sys.excepthook = mpiExceptHook
-
-
-         sys.stdout.write(
-            "Hello, World! I am process %d of %d on %s.\n" 
-            % (mpi_rank, mpi_size, mpi_name))
-
-
-      if options.numProcs>1:
-         printerr("Starting to use %d workers"%(options.numProcs))
-         rlp.set_workers(options.numProcs)
-
-      
-      if mpi_rank == 0:
-
-         rlp.setCallThreshold(options.callThreshold)
-         printerr("Reading fad %s"%(options.fadFile))
-         try:
-            rlp.loadFAD( options.fadFile )
-         except IOError,e:
-            printerr(str(e))
-            return False
-         printerr("Read FAD for %d individuals and %d markers!"%(rlp.indivs,rlp.markers))
-
-
-
-         if options.ibdFile is not None:
-            printerr("Reading ibd file",options.ibdFile)
-            try:
-               rlp.loadIBD( options.ibdFile )
-            except IOError,e:
-               printerr(str(e))
-               return False
-            
-            printerr("Started to read IBD!")
-
-         if options.ibdCover is not None:
-            cov = rlp.ibdCoverCounts( options.scoreLimit )
-            numpy.savetxt( options.ibdCover, cov, fmt="%d", delimiter="\t" )
-            return True
-
-
-         if options.geneticMap is not None:
-            printerr("Reading genetic map")
-            try:
-               rlp.loadGeneticMap( open(options.geneticMap) )
-            except IOError,e:
-               printerr(str(e))
-               return False
-            printerr("Read genetic map!")
-
-         rlp.initMessages( options.ExpectedIBS, options.ExpectedIBD, errP = options.errP )
-         #rlp.visualiseCPT( fname = "CPT_ibs%g_ibd%g.png"% (options.ExpectedIBS, options.ExpectedIBD) )
-         #sys.exit()
-
-
-         intIBD = None
-         intFAD = None
-         if options.saveIntermediate:
-            intFAD="%s_%%d"%(options.outFile)
-            if options.ibdSegmentCalls is not None:
-               intIBD="%s_%%d"%(options.ibdSegmentCalls)
-
-
-         if options.loadLikelihoods is not None:
-            printerr("Loading initial likelihoods from",options.loadLikelihoods)
-            try:
-               rlp.loadLike(options.loadLikelihoods)
-            except IOError,e:
-               printerr(str(e))
-               return False
-
-         #trimLength = rlp.markers/2 if options.slice_length <= 0 else options.slice_length/2
-         trimLength = max(options.minIBDlength/2,0)
-         printerr("Breaking phase symmetries with the het after %dth SNP!"%(trimLength))
-         printerr("Broke phase symmetry for %d individuals"%(rlp.breakPhaseSymmetry(trimLength)))
-
-
-      rlp.set_slice_len(options.slice_length)
-
-      if options.useMPI:
-         assert rlp.haveIBD(), "The putative IBD finding is not implemented with MPI. Sorry."
-         #if self.__ibd is None:
-         #   self.phasePreProc(options.ibdSegmentCalls)
-         rlp.phaseMPI(iterations = options.iterations )
-      else:
-         if not rlp.haveIBD():
-            rlp.phasePreProc(options.ibdSegmentCalls)
-         if options.ibdCoverLimit > 0:
-            printerr("Filtering IBD segments to coverage of about %d"%(options.ibdCoverLimit))
-            addC,skipC,cover = rlp.filterIBDcover( options.ibdCoverLimit, options.minIBDlength)
-            printerr("Skipped %d/%d = %g%% putative IBD segments"%(skipC,addC+skipC, skipC*100.0/(addC+skipC)))
-            cover = cover.sum(axis=2)
-            printerr("Mean IBD coverage per site: %g"%(cover.mean()))
-            percs = numpy.percentile( cover, [0.0, 25.0, 50.0, 75.0, 100.0])
-            printerr("IBD coverage quartiles per site:",", ".join("%g"%(x) for x in percs))
-            printerr("Sites with less than %d coverage: %g%%"%(options.ibdCoverLimit, (cover<options.ibdCoverLimit).mean()*100.0))
-            printerr("Sites with two or less  coverage: %g%%"%((cover<3).mean()*100.0))
-            if options.ibdSegmentCalls is not None:
-               fibd_name = addSuffix(options.ibdSegmentCalls, ".f%dibd"%(options.ibdCoverLimit) )
-               printerr("Writing included putative IBD segments to %s."%(fibd_name))
-               rlp.writeIBD(fibd_name)
-
-         rlp.phase(iterations = options.iterations,
-                   intFADbase = intFAD,
-                   intIBDbase = intIBD)
-
-      if mpi_rank == 0:
-         printerr("Writing output FAD to",options.outFile)
-         rlp.writeFAD(options.outFile)
-
-         if options.outQualFile is not None:
-            printerr("Writing quality scores to",options.outQualFile)
-            rlp.writeQual(options.outQualFile)
-            
-         if options.ibdSegmentCalls is not None:
-            printerr("Writing final IBD calls to",options.ibdSegmentCalls)
-            rlp.writeIBD(options.ibdSegmentCalls)
-            
-         if options.likeFile is not None:
-            printerr("Writing likelihoods to",options.likeFile)
-            rlp.writeLike(options.likeFile)
-
-#  LocalWords:  printerr
-   
-
-if __name__ == "__main__":
-
-
-   main()
