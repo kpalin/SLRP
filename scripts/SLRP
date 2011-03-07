@@ -22,8 +22,8 @@ from __future__ import with_statement
 
 import sys
 
-import SLRPlib
-from SLRPlib.SLRP import printerr,addSuffix
+from SLRPlib import SLRP
+from SLRPlib.tools import printerr,addSuffix
 
 
 

@@ -35,10 +35,10 @@ except ImportError:
 
 
 #sys.path.append("/nfs/users/nfs_k/kp5/Kuusamo/scripts/")
-def printerr(*val):
-   "Print to standard error. Might conflict with python3"
-   sys.stderr.write(" ".join(map(str, val))+"\n")
 
+
+
+from SLRPlib.tools import addSuffix,printerr
 
 def handler(signum, frame):
    raise KeyboardInterrupt("Job is being terminated")
@@ -111,14 +111,6 @@ except ImportError ,e:
 
 
 
-def addSuffix(base,suffix):
-   "Append a suffix to the base such that .gz ending is kept last"
-   if base.endswith(".gz"):
-      out = base[:-3] + suffix.strip() + ".gz"
-   else:
-      out = base + suffix
-
-   return out
 
 
 

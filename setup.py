@@ -9,23 +9,23 @@ try:
     git_proc.wait()
     if git_proc.returncode == 0:
         print "Successfull git call"
-        open("SLRPlib/__version__.py","w").write("_version=\"%s\""%(git_version))
+        open("SLRPlib/version.py","w").write("__version__=\"%s\""%(git_version))
 except OSError:
     pass
                             
 
-from SLRPlib.__version__ import _version
+import SLRPlib
 
 
 
 
 setup(name='SLRP',
-      version=_version,
+      version = SLRPlib.__version__,
       description='Systematic Long Range Phasing',
       author='Kimmo Palin',
       author_email='kimmo.palin@sanger.ac.uk',
       url='https://github.com/kpalin/SLRP',
-      packages=['SLRPlib'],
+      packages=['SLRPlib',"SLRPlib/test"],
       scripts=['scripts/SLRP'],
       license="GPLv2 or greater",
      )
