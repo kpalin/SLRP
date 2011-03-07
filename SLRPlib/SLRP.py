@@ -591,14 +591,10 @@ def open(filename,mode="r",bufsize=-1):
 
 
 
-def reverse_enumerate(a):
-    return ((len(a)-1-i, x) for i, x in enumerate(reversed(a)))
 
 
 
 
-
-scannedTo={}
 
 def nlogsumnexp(p,q):
     "Return -log(exp(-p)+exp(-q)) calculated accurately"

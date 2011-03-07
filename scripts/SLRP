@@ -22,14 +22,14 @@ from __future__ import with_statement
 
 import sys
 
-from SLRPlib import SLRP
+from SLRPlib import SLRP,tools
 from SLRPlib.tools import printerr,addSuffix
 
 
+tools.setup_post_mortem()
 
 
-
-
+import numpy
 import optparse
 
 #from simuPop_utils import *
@@ -206,6 +206,7 @@ def process_args():
    if options.seed is not None:
       printerr("Setting random seed to %d. The run is deterministic!!"%(options.seed))
       numpy.random.seed(options.seed)
+      import random
       random.seed(options.seed)
 
    return options
@@ -218,7 +219,6 @@ def main():
    global printerr
 
 
-
    if False and options.outFile is None:
       printerr("Nothing to store, nothing to do..")
    else:
@@ -227,7 +227,7 @@ def main():
          myDataType = numpy.float32
       else:
          myDataType = numpy.float64
-      rlp = longRangePhase(dType = myDataType)
+      rlp = SLRP.longRangePhase(dType = myDataType)
 
       rlp.setDamping(options.dampF)
       rlp.setIBDprob(options.prob_ibd)
