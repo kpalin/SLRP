@@ -35,3 +35,33 @@ def setup_post_mortem():
 
     sys.excepthook = info
 
+
+def lineno():
+    """Returns the current line number in our program.
+
+    Danny Yoo (dyoo@hkn.eecs.berkeley.edu)
+    """
+    import inspect
+    return inspect.currentframe().f_back.f_lineno
+    
+
+def sortInplaceByCol(a,col=0):
+    "Sort a normal 2d numpy array according to col column. First by default."
+    recTypes = [("f%d"%(i),a.dtype) for i in range(a.shape[1])]
+    v = a.view(recTypes)
+    v.sort(order=[ recTypes[col][0] ],axis=0)
+    return v
+
+
+def sortDescendingByCol(a,col=0):
+    "Sort a normal 2d numpy array to descending order according to col column. First by default. Not in place"
+    v = a[:,col].argsort()[::-1]
+    return a[v]
+    
+def _functionId(nFramesUp=0):
+    """ Create a string naming the function n frames up on the stack.
+    """
+    import sys
+    co = sys._getframe(nFramesUp+1).f_code
+    return "%s (%s @ %d)" % (co.co_name, co.co_filename, co.co_firstlineno)
+

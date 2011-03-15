@@ -18,15 +18,15 @@ from __future__ import with_statement
 
 
 
-
+from SLRPlib import tools
+tools.setup_post_mortem()
 
 import sys
 
-from SLRPlib import SLRP,tools
+from SLRPlib import SLRP
 from SLRPlib.tools import printerr,addSuffix
 
 
-tools.setup_post_mortem()
 
 
 import numpy
@@ -87,6 +87,12 @@ def process_args():
                      help="Output the number of individuals sharing a trackt IBD.   [default:%default]",
                      metavar="FILE",default=None
                      )
+
+   parser.add_option("-R", "--freq", dest="freqFile",
+                     help="File to read the allele frequencies from. If the file doesn't exits, the alele frequency estimates are written there   [default:%default]",
+                     metavar="FILE",default=None
+                     )
+
    
    parser.add_option("-I", "--iterations", dest="iterations",type="int",
                      help="Maximum number of iterations to run the message passing. Also end if no improvement over three loops [default:%default]",
@@ -113,10 +119,10 @@ def process_args():
 
 
    parser.add_option("", "--minIBDlength", dest="minIBDlength",type="int",
-                     help="Hard lower limit for length of IBD segment in markers. This should speed up computation by disregarding uninformative IBS segments. [default: %default]", metavar="NUM",default=20 )
+                     help="Hard lower limit for length of IBD segment in markers. This should speed up computation by disregarding uninformative IBS segments. [default: %default]", metavar="NUM",default=10 )
 
    parser.add_option("", "--IBDcoverLimit", dest="ibdCoverLimit",type="int",
-                     help="Soft lower limit for number of IBD sharing. Only do message passing on the longest NUM segments covering a locus. The selection is greedy, hence there might be more than minimum number of segments used. Non positive limits turn off this limit. [default: %default]", metavar="NUM",default=-1 )
+                     help="Soft lower limit for number of IBD sharing. Only do message passing on the longest NUM segments covering a locus. The selection is greedy, hence there might be more than minimum number of segments used. Non positive limits turn off this limit. [default: %default]", metavar="NUM",default=15 )
 
 
 
@@ -174,6 +180,10 @@ def process_args():
 
    parser.add_option("", "--test", dest="test",action="store_true",
                      help="Activate some testing thingies  [default:%default]",
+                     default=False
+                     )
+   parser.add_option("", "--verbose", dest="verbose",action="store_true",
+                     help="Output some more diagnostics  [default:%default]",
                      default=False
                      )
 
@@ -292,7 +302,14 @@ def main():
             return False
          printerr("Read FAD for %d individuals and %d markers!"%(rlp.indivs,rlp.markers))
 
-
+         if options.freqFile is not None:
+            try:
+               rlp.loadAlleleFrequencies(options.freqFile)
+            except IOError:
+               rlp.writeAlleleFrequencies(options.freqFile)
+               printerr("Wrote allele frequencies to %s."%(options.freqFile))
+            else:
+               printerr("Loaded allele frequencies from %s."%(options.freqFile))
 
          if options.ibdFile is not None:
             printerr("Reading ibd file",options.ibdFile)
@@ -341,7 +358,7 @@ def main():
                return False
 
          #trimLength = rlp.markers/2 if options.slice_length <= 0 else options.slice_length/2
-         trimLength = max(options.minIBDlength/2,0)
+         trimLength = max(options.minIBDlength*2,0)
          printerr("Breaking phase symmetries with the het after %dth SNP!"%(trimLength))
          printerr("Broke phase symmetry for %d individuals"%(rlp.breakPhaseSymmetry(trimLength)))
 
@@ -354,22 +371,32 @@ def main():
          #   self.phasePreProc(options.ibdSegmentCalls)
          rlp.phaseMPI(iterations = options.iterations )
       else:
+         printerr("Filtering IBD segments to coverage of about %d"%(options.ibdCoverLimit))
+         cover = None
          if not rlp.haveIBD():
-            rlp.phasePreProc(options.ibdSegmentCalls)
-         if options.ibdCoverLimit > 0:
-            printerr("Filtering IBD segments to coverage of about %d"%(options.ibdCoverLimit))
+            rlp.phasePreProc(options.ibdSegmentCalls,options.ibdCoverLimit if options.ibdCoverLimit>0 else 99999, options.minIBDlength)
+         if False and options.ibdCoverLimit > 0:
             addC,skipC,cover = rlp.filterIBDcover( options.ibdCoverLimit, options.minIBDlength)
             printerr("Skipped %d/%d = %g%% putative IBD segments"%(skipC,addC+skipC, skipC*100.0/(addC+skipC)))
             cover = cover.sum(axis=2)
+            if options.ibdSegmentCalls is not None:
+               fibd_name = addSuffix(options.ibdSegmentCalls, ".f%dibd"%(options.ibdCoverLimit) )
+               printerr("Writing included putative IBD segments to %s."%(fibd_name))
+               rlp.writeIBD(fibd_name)
+
+         if options.verbose:
+            if cover is None:
+               cover = rlp.ibdCoverCounts()
+               cover = cover[:,::2]
             printerr("Mean IBD coverage per site: %g"%(cover.mean()))
             percs = numpy.percentile( cover, [0.0, 25.0, 50.0, 75.0, 100.0])
             printerr("IBD coverage quartiles per site:",", ".join("%g"%(x) for x in percs))
             printerr("Sites with less than %d coverage: %g%%"%(options.ibdCoverLimit, (cover<options.ibdCoverLimit).mean()*100.0))
             printerr("Sites with two or less  coverage: %g%%"%((cover<3).mean()*100.0))
-            if options.ibdSegmentCalls is not None:
-               fibd_name = addSuffix(options.ibdSegmentCalls, ".f%dibd"%(options.ibdCoverLimit) )
-               printerr("Writing included putative IBD segments to %s."%(fibd_name))
-               rlp.writeIBD(fibd_name)
+
+            
+            percs = numpy.percentile( rlp.ibd_regions["endM"]-rlp.ibd_regions["beginM"], [0.0, 25.0, 50.0, 75.0, 100.0])
+            printerr("Putative IBD region length quartiles in #markers:",", ".join("%g"%(x) for x in percs))
 
          rlp.phase(iterations = options.iterations,
                    intFADbase = intFAD,
