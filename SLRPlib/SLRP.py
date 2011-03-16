@@ -1436,6 +1436,7 @@ class longRangePhase:
       self.LLtable = numpy.log(L_ibd_table) - numpy.log(L_pop_table)
       del(L_ibd_table)
       del(L_pop_table)
+      self.LLtable = numpy.cast[self.dataType](self.LLtable)
       
 
    def __computeOneIBDnoUpdate(self,indPairs):
