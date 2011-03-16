@@ -9,6 +9,13 @@ def addSuffix(base,suffix):
    return out
 
 
+def uniqueRows(a):
+   "Return array containing unique rows of a"
+   import numpy
+   b=numpy.unique(a.view('S%d'%(a.itemsize*a.shape[1]))).view(a.dtype)
+   b=b.reshape((-1,a.shape[1]))
+   return b
+   
 def printerr(*val):
    "Print to standard error. Might conflict with python3"
    import sys

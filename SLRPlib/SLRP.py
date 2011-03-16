@@ -2800,8 +2800,8 @@ class longRangePhase:
 
 
 
-   def phasePreProc(self, ibdSegmentCalls = None,min_cover = 15,min_ibd_length = 10):
-      "Compute the first step of SLRP. i.e. find putative IBD segments"
+   def phasePreProcHighMem(self, ibdSegmentCalls = None,min_cover = 15,min_ibd_length = 10):
+      "Compute the first step of SLRP. i.e. find putative IBD segments. This version needs a lot of memory with large datasets."
       
       allPairs_iter = ((2*ind1,2*ind2)  for ind2 in xrange(self.indivs) for ind1 in xrange(ind2))
 
@@ -2854,12 +2854,61 @@ class longRangePhase:
 
 
 
+   def phasePreProc(self, ibdSegmentCalls = None,min_cover = 15,min_ibd_length = 10):
+      "Compute the first step of SLRP. i.e. find putative IBD segments"
+      
+      ibdRegions=[]
+      newTime=time.time()
+      startTime=newTime
+      
+      self.computeGenos()
+      self.computeLogLikeTable()
+      
+      assert self.geno.flags.c_contiguous, "Genotype array must be C-contiguous"
+      assert self.geno.strides[1] == 1, "Geno array must be indexable by first coordinate."
+      assert self.LLtable.shape == (self.markers,4,4), "Badly shaped LL table"
+      assert self.LLtable.flags.c_contiguous, "LLtable array must be C-contiguous"
+      peakThreshold = 4.0;
+      dipThreshold = 12.0
+      #pdb.set_trace()
+      if self.poolSize <= 1:
+         ibdRegions=self.c_ext.LLscan_and_filter(0,self.indivs,self.geno,self.LLtable,peakThreshold,dipThreshold,min_cover,min_ibd_length )
+      else:
+         chunkSize = int( self.indivs * 1.0 / self.poolSize + 1) 
+
+         #subsetPairs=list( list(it.islice(allPairs,chunkSize))  for i in range(0, numPairs, chunkSize) )
+         subsetPairs=[(i,min(self.indivs,i+chunkSize)) for i in range(0, self.indivs, chunkSize) ]
          
-#          if len(self.ibd_regions) > 0:
-#             if self.worldSize <= 1 :
-#                self.phase(iterations,intFADbase,intIBDbase,ibdSegmentCalls)
-#             else:
-#                self.phaseMPI(iterations)
+         printerr("Chunks of size",chunkSize)
+         printerr("subsets",len(subsetPairs),subsetPairs)
+         ibdRegions = self.pmap(lambda x:self.c_ext.LLscan_and_filter(x[0],x[1],self.geno,self.LLtable,peakThreshold,dipThreshold,min_cover,min_ibd_length ), subsetPairs )
+         ibdRegions = numpy.concatenate(ibdRegions)
+         ibdRegions = tools.uniqueRows(ibdRegions)
+         newTime = time.time()
+
+
+      #ibdRegions=ibdRegions[(ibdRegions[:,0]==4)]
+      #&(ibdRegions[:,2]<=3896)&(ibdRegions[:,3]>=4015)]
+      #ibdRegions[:,0]=ibdRegions[:,1]
+      #ibdRegions[:,0]=0
+      #ibdRegions[:,1]=0
+      printerr( "All pairs took %g mins"%( ( time.time() - startTime ) / 60.0 ))
+      printerr("Using %d found putative IBD regions"%(ibdRegions.shape[0]))
+
+
+      myStack = numpy.hstack(( ibdRegions[:,:2], numpy.reshape(ibdRegions[:,4],(-1,1)), ibdRegions[:,2:4], self.snpPos[ibdRegions[:,2:4]]) )
+      self.ibd_regions = numpy.ascontiguousarray(myStack, dtype=numpy.int32)
+
+      self.ibd_regions = self.ibd_regions.T.view(self.ibd_regions_dtype_int)[0]
+
+
+      if ibdSegmentCalls is not None:
+         open(tools.addSuffix(ibdSegmentCalls,".aibd"),"w").writelines("%d\t%d\t%g\t%d\t%d\t%d\t%d\n"%(x[0],x[1],float(x[2]),x[3],x[4],x[5],x[6]) for x in self.ibd_regions)
+         printerr("Max end",self.ibd_regions["endM"].max())
+
+
+
+         
       
    def phase(self,iterations=10,intFADbase=None,intIBDbase=None):
       "Compute the long range phase over IBD segments in allocedIBD"

@@ -13,6 +13,361 @@ except ImportError:
 import numpy
 
 
+def add_LLscan_and_filter_func(mod):
+   "Add combined scaning and filtering function"
+   # Type defintions
+   peakThreshold = 0.0;
+   dipThreshold = 0.0
+   cover_limit = 1
+   min_length = 10
+   from_indiv = 0
+   to_indiv = -1
+   indPairs = numpy.zeros((1,2),dtype="int")
+   genos = numpy.array([[0]],dtype=numpy.int8)
+   
+   mod.customize.add_support_code("""struct ibd_region_type {
+    int i1;
+    int i2;
+    int bPos;
+    int ePos;
+    int score;
+    bool operator<(const ibd_region_type &B) const {
+    bool r=score<B.score
+           || (score==B.score && bPos<B.bPos)
+           || (score==B.score && bPos==B.bPos && ePos<B.ePos)
+           || (score==B.score && bPos==B.bPos && ePos==B.ePos && i1<B.i1)
+           || (score==B.score && bPos==B.bPos && ePos==B.ePos && i1==B.i1 && i2<B.i2);
+    return r;
+    }
+};
+
+    """)
+
+
+   code="#line %d \"scanTools.py\""%(tools.lineno()+1) + """
+char *g1, *g2,*g1end;
+
+
+
+
+%(cType)s value,*LLptr,*LLendPtr,cum_value, max_value;
+int markers = genos_array->dimensions[1];
+int individuals = genos_array->dimensions[0];
+%(cType)s _lowLimit, _dipLimit;
+_lowLimit = peakThreshold;
+_dipLimit = dipThreshold;
+const %(cType)s lowLimit = _lowLimit, dipLimit = _dipLimit;
+
+
+//return_val = 0;
+LLendPtr = ((%(cType)s*)LLtable_array->data) + PyArray_NBYTES(LLtable_array)/sizeof(%(cType)s);
+
+PyThreadState *_save;
+#define PY_BEGIN_ALLOW_THREADS   _save = PyEval_SaveThread();
+#define PY_END_ALLOW_THREADS     PyEval_RestoreThread(_save); 
+
+
+// Stride information is in bytes but pointer arithmetic in sizeof(type) bytes
+const int LLstride = LLtable_array->strides[0]/sizeof(%(cType)s);
+const int G1stride = LLtable_array->strides[1]/sizeof(%(cType)s);
+const int G2stride = LLtable_array->strides[2]/sizeof(%(cType)s);
+
+std::vector<ibd_region_type> ibd_regions;
+std::set<ibd_region_type> out_regions;
+
+/*
+kvek_t(int) ibdRegions;
+kv_init(ibdRegions);
+*/
+PY_BEGIN_ALLOW_THREADS;
+if(to_indiv<0 || to_indiv>individuals) {
+   to_indiv=individuals;
+}
+
+for(int i1=from_indiv; i1 < to_indiv ; i1++) {
+  for(int i2=0; i2 < individuals ; i2++) {
+    if(i1==i2) {
+         continue;
+    }
+    LLptr = (%(cType)s*)LLtable_array->data;
+    g1 = (char*)(genos_array->data + genos_array->strides[0]*i1);
+    g2 = (char*)(genos_array->data + genos_array->strides[0]*i2);
+
+    g1end = genos_array->data + genos_array->strides[0]*(i1+1);
+    cum_value = 0.0,max_value = 0.0;
+    int low_idx = 0, peak_idx = 0;
+    int idx = 0;
+    while(LLptr < LLendPtr) {
+       value = *(LLptr + (*g1)*G1stride + (*g2)*G2stride);
+       cum_value += value;
+
+
+       /*
+       // Alternative, more straightforward but slower way
+       %(cType)s altValue;
+       char altg1,altg2;
+       altg1=genos(i1,idx);
+       altg2=genos(i2,idx);
+       altValue = LLtable(idx,(int)altg1,(int)altg2);
+       if (PyErr_Occurred()) {
+       return_val = 2;  // propagate error 
+       goto loopBreak;
+    } 
+       if(abs(value-altValue)>-0.1) {
+           std::cerr<<"err: " << idx <<" "
+                    <<value<<" "<<altValue
+                    <<" "
+                    <<(int)altg1<<(int)altg2
+                    <<" xxx "
+                    <<(int)*g1<<(int)*g2 <<std::endl;
+           //PY_END_ALLOW_THREADS;
+           //goto loopBreak;
+       } else {
+          //std::cerr<<".";
+       } 
+       // Slow way ending
+       */
+
+       if( cum_value > max_value) {
+           max_value = cum_value;
+           peak_idx = idx;
+       } else if( cum_value < (max_value - dipLimit)  || cum_value < 0.0) {
+              if(max_value > lowLimit ) {  // Gone past a high peak
+                  //std::cerr<< "High: ";
+                  ibd_region_type high_reg;
+                  high_reg.i1 = std::min(i1,i2)*2;
+                  high_reg.i2 = std::max(i1,i2)*2;
+                  high_reg.bPos = low_idx;
+                  high_reg.ePos = peak_idx;
+                  high_reg.score=(int)max_value;
+                  ibd_regions.push_back(high_reg);
+                  std::push_heap(ibd_regions.begin(),ibd_regions.end());
+                  //ibdRegions->push_back(i1 * 2);
+                  //ibdRegions->push_back(i2 * 2);
+                  //ibdRegions->push_back(low_idx);
+                  //ibdRegions->push_back(peak_idx);
+                  //ibdRegions->push_back((int)max_value); 
+
+                  /*
+                  kv_push(int,ibdRegions,i1 * 2);
+                  kv_push(int,ibdRegions,i2 * 2);
+                  kv_push(int,ibdRegions,low_idx);
+                  kv_push(int,ibdRegions,peak_idx);
+                  kv_push(int,ibdRegions,(int)max_value);
+                  */
+                  
+                  //std::cerr<< peak_idx-low_idx << " : " << low_idx << "-" << peak_idx << " " << max_value <<" : " << cum_value <<std::endl;
+                  //if(ibdRegions->size() > 20) { goto loopBreak;}
+                  //if(peak_idx>700) {goto loopBreak;}
+                  //if(kv_size(ibdRegions) > 20) { goto loopBreak;}
+              }
+              // Reset peak tracking
+              low_idx = peak_idx = idx;
+              max_value = cum_value = 0.0;
+       }
+              
+       
+       idx++;
+       LLptr+=LLstride;
+       g1++;
+       g2++;
+    }
+    
+    if(max_value > lowLimit ) {  // Gone past a high peak
+         ibd_region_type high_reg;
+         high_reg.i1 = i1*2;
+         high_reg.i2 = i2*2;
+         high_reg.bPos = low_idx;
+         high_reg.ePos = peak_idx;
+         high_reg.score=(int)max_value;
+         ibd_regions.push_back(high_reg);
+         std::push_heap(ibd_regions.begin(),ibd_regions.end());
+         //std::cerr<< "High: ";
+         //ibdRegions->push_back(i1 * 2);
+         //ibdRegions->push_back(i2 * 2);
+         //ibdRegions->push_back(low_idx);
+         //ibdRegions->push_back(peak_idx);
+         //ibdRegions->push_back((int)max_value);
+    }
+  }
+    // Now filter 
+
+
+
+
+
+// a map from #position to #coverage from here on.
+ std::map< int, int >  covers;
+std::map<int,int>::iterator i1b,i2b,scan;
+
+
+#ifndef NIBDFILTERDEBUG
+int _covers[markers];
+memset(_covers,0,sizeof(int)*markers);
+bool brute_high_cover;
+int brute_because;
+#endif
+
+struct ibd_region_type *cand_ibd,*cand_ibd_end;
+
+int  __count=0;
+
+while(!ibd_regions.empty()) {
+    cand_ibd = &ibd_regions.front();
+   
+
+   /*
+   std::cerr << cand_ibd->i1 <<" "
+   << cand_ibd->i2 <<" "
+   << cand_ibd->bPos <<" "
+   << cand_ibd->ePos <<" "
+   << cand_ibd->score << std::endl;
+   */
+
+
+
+
+
+
+                    
+
+   i1b = covers.lower_bound(cand_ibd->bPos);
+   // assert  cand_ibd->bPos <= (*i1b).first || i1b==covers.end()
+
+   // scan until coverage falls below limit 
+   bool high_cover = !(  (i1b == covers.end())  ||
+                       (i1b == covers.begin() && (*i1b).first>cand_ibd->bPos) );
+
+
+
+
+
+   if (high_cover) {
+       scan = i1b;
+       if((*scan).first > cand_ibd->bPos) {
+         scan--;
+       }
+       while(high_cover && scan != covers.end() &&
+                        (*scan).first <= cand_ibd->ePos){
+            //std::cerr<<(*scan).first<<":"<<(*scan).second<<std::endl;
+            //assert(_covers[cand_ibd->i1/2][(*scan).first] == (*scan).second);
+            if( (*scan).second < cover_limit ) {
+                high_cover=false;
+            }
+            scan++;
+       }
+
+
+   }
+
+
+   if(!high_cover) {  // Insert this candidate
+
+#ifndef NIBDFILTERDEBUG
+      for(int i=cand_ibd->bPos; i<=cand_ibd->ePos;i++) {
+          _covers[cand_ibd->i1/2][i]++;
+          _covers[cand_ibd->i2/2][i]++;
+      }
+#endif
+
+      out_regions.insert(*cand_ibd);
+
+
+      
+      // Increase counts for i1
+      if(i1b == covers.end()) {
+         i1b = covers.insert(i1b, std::pair<int,int>(cand_ibd->bPos, 1) );
+         covers.insert(i1b, std::pair<int,int>(cand_ibd->ePos+1, 0) );
+         //assert(_covers[cand_ibd->i1/2][cand_ibd->ePos] == 1);
+         //assert(cand_ibd->ePos==7504 || _covers[cand_ibd->i1/2][cand_ibd->ePos+1] == 0);
+         //assert(_covers[cand_ibd->i1/2][cand_ibd->bPos] == 1);
+      } else {
+         if(cand_ibd->bPos < (*i1b).first ) {
+            int coverHere = 0;
+            if(i1b!=covers.begin()) {
+               scan=i1b;
+               scan--;
+               coverHere = (*scan).second;
+            }
+            covers.insert(i1b, std::pair<int,int>(cand_ibd->bPos, coverHere + 1 ));
+            //assert(_covers[cand_ibd->i1/2][cand_ibd->bPos] == i1cover[cand_ibd->bPos]);
+         }
+         for( scan = i1b; scan != covers.end() &&
+                         (*scan).first <= cand_ibd->ePos; scan++){
+            (*scan).second++;
+            //assert(_covers[cand_ibd->i1/2][(*scan).first] == (*scan).second);
+         }
+         if(scan==covers.end() || (*scan).first > cand_ibd->ePos+1) {
+            scan--;
+            covers.insert(scan, std::pair<int,int>(cand_ibd->ePos+1, (*scan).second-1) );
+            //assert((cand_ibd->ePos==7504 )||_covers[cand_ibd->i1/2][cand_ibd->ePos+1] == (*scan).second -1 );
+         }
+      }
+      //assert(_covers[cand_ibd->i1/2][cand_ibd->bPos] == i1cover[cand_ibd->bPos]);
+      //assert( (cand_ibd->ePos==7504) || _covers[cand_ibd->i1/2][cand_ibd->ePos+1] == i1cover[cand_ibd->ePos+1]);
+
+
+                    
+      assert(!high_cover);
+   }
+    std::pop_heap(ibd_regions.begin(),ibd_regions.end());ibd_regions.pop_back();
+
+
+}  
+//std::cerr<<"ind1: "<<i1<<" ibdRegions.size() = "<<ibd_regions.size() <<" out_regions.size() = "<<out_regions.size()<< std::endl;
+
+
+
+
+}
+PY_END_ALLOW_THREADS;
+
+
+
+// Return
+npy_intp dims[2] = {out_regions.size(),5};
+PyObject *out =  PyArray_SimpleNew(2, dims, PyArray_INT);
+PyArrayObject *out_array = (PyArrayObject*)out;
+#define OUT2(i,j) (*((int*)(out_array->data + (i)*out_array->strides[0] + (j)*out_array->strides[1])))
+PY_BEGIN_ALLOW_THREADS;
+int countOut=0;
+for(std::set<ibd_region_type>::iterator it=out_regions.begin(); it != out_regions.end(); it++,countOut++ ) {
+    OUT2(countOut,0) = (*it).i1;
+    OUT2(countOut,1) = (*it).i2;
+    OUT2(countOut,2) = (*it).bPos;
+    OUT2(countOut,3) = (*it).ePos;
+    OUT2(countOut,4) = (*it).score;
+}
+
+PY_END_ALLOW_THREADS;
+return_val = out;
+
+
+
+
+"""
+
+   mod.customize.add_header("<algorithm>")
+   mod.customize.add_header("<set>")
+   for cDataType,dataType in (("double",numpy.float64),("float",numpy.float32)):
+      LLtable = numpy.zeros((1,3,3),dtype = dataType)
+      func = ext_tools.ext_function('LLscan_and_filter_%s'%(cDataType),
+                                    code%{"cType":cDataType},
+                                    ["from_indiv","to_indiv",
+                                     "genos","LLtable", "peakThreshold",
+                                     "dipThreshold","cover_limit","min_length"])
+      mod.add_function(func)
+
+
+
+
+
+
+
+
+
+   
+
 def add_LLscan_func(mod):
     "Add the LLscan function to the module mod"
 
@@ -181,17 +536,19 @@ delete ibdRegions;
 
 
 
+
+
+
+
+
+
+
+
+
 def add_ibd_region_filter(mod):
     "Add a function to greedily select subset of ibd segments with high coverage"
     
 
-    mod.customize.add_support_code("""struct ibd_region_type {
-    int i1;
-    int i2;
-    int bPos;
-    int ePos;
-    int score;
-    };""")
     code="#line %d \"scanTools.py\""%(tools.lineno()+1) + """
 const int c_indivs = (int)individuals;
 const int c_low_limit = (int)low_limit;
@@ -1053,7 +1410,7 @@ def build_c_scan_ext():
     mod.customize.add_header("<cmath>")
     mod.customize.add_header("<assert.h>")
 
-
+    add_LLscan_and_filter_func(mod)
     add_LLscan_func(mod)
     add_ibd_region_filter(mod)
     add_processAllocedIBD(mod)
@@ -1063,7 +1420,7 @@ def build_c_scan_ext():
     mod.customize.add_extra_compile_arg("-g")
     mod.customize.add_extra_compile_arg("-Wall")
     mod.customize.add_extra_compile_arg("-O3")
-    mod.customize.add_extra_compile_arg("-ftree-vectorizer-verbose=3")
+    #mod.customize.add_extra_compile_arg("-ftree-vectorizer-verbose=3")
     mod.customize.add_extra_compile_arg("-DNIBDFILTERDEBUG")
     mod.customize.add_extra_compile_arg("-DNDEBUG")
     mod.compile(verbose=2,location = os.path.dirname(__file__))
