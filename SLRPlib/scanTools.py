@@ -587,12 +587,13 @@ def add_processAllocedIBD(mod):
                          const %(cType)s h12p_V =  HLIKE3(ind1,j,h0) - P2H1(ij,h0);  //h12ca(ij,h0);
                          for(h1=0;h1<4;h1++) {
                             // From diplotype 2 to p
-                             %(cType)s h22p_V =  HLIKE3(ind2,j,h1) - P2H2(ij,h1);  //h22ca(ij,h1);
-                            %(cType)s CPT_V = CPT(j, p0 ,p,h0,h1) ;
+                            const %(cType)s h22p_V =  HLIKE3(ind2,j,h1) - P2H2(ij,h1);  //h22ca(ij,h1);
+                            const %(cType)s CPT_V = CPT(j, p0 ,p,h0,h1) ;
                             assert(CPT_V>=0.0);
                             assert(h22p_V>=0.0);
                             //std::cerr<<ca2p_V<<"->";
                             //ca2p_V = std::min(ca2p_V, CPT(j, p0 ,p,h0,h1) + h12ca_V + h22ca(ij,h1) + ca2p0_V );
+                            //p2p_V = std::min(p2p_V, CPT(j, p0 ,p,h0,h1) + h12p_V + h22p_V + p2p0_V );
                             p2p_V = std::min(p2p_V, CPT(j, p0 ,p,h0,h1) + h12p_V + h22p_V + p2p0_V );
                             assert( p2p_V >= 0.0);
                          }
@@ -808,8 +809,8 @@ def add_processAllocedIBD_sumProduct(mod):
 
 #define P2H1(i,j)  (*((%(cType)s*)(p2h1_array_ind->data + (i)*p2h1_array_ind->strides[0] + (j)*p2h1_array_ind->strides[1])))
 #define P2H2(i,j)  (*((%(cType)s*)(p2h2_array_ind->data + (i)*p2h2_array_ind->strides[0] + (j)*p2h2_array_ind->strides[1])))
-        hLike_ptr_t __restrict__ p2h1_ptr = (hLike_ptr_t)(p2h1_array->data);
-        hLike_ptr_t __restrict__ p2h2_ptr = (hLike_ptr_t)(p2h2_array->data);
+//        hLike_ptr_t __restrict__ p2h1_ptr = (hLike_ptr_t)(p2h1_array->data);
+//        hLike_ptr_t __restrict__ p2h2_ptr = (hLike_ptr_t)(p2h2_array->data);
 //#define P2H1(pos,h) (p2h1_ptr[pos])[h]
 //#define P2H2(pos,h) (p2h2_ptr[pos])[h]
 
@@ -840,9 +841,9 @@ def add_processAllocedIBD_sumProduct(mod):
         for(int ij=0,j = beginM ; j <= endM;j++,ij++) {
              %(cType)s tot_sum_p2p = 0.0;
 
-             const CPT_ptr_t __restrict__ CPT_ptr = (CPT_ptr_t)(CPT_array->data + CPT_array->strides[0]*j);
-             const hLike_ptr_t __restrict__ hLike1_ptr = (hLike_ptr_t)(hLike_array->data + hLike_array->strides[0]*ind1 + hLike_array->strides[1]*j);
-             const hLike_ptr_t __restrict__ hLike2_ptr = (hLike_ptr_t)(hLike_array->data + hLike_array->strides[0]*ind2 + hLike_array->strides[1]*j);
+//             const CPT_ptr_t __restrict__ CPT_ptr = (CPT_ptr_t)(CPT_array->data + CPT_array->strides[0]*j);
+//             const hLike_ptr_t __restrict__ hLike1_ptr = (hLike_ptr_t)(hLike_array->data + hLike_array->strides[0]*ind1 + hLike_array->strides[1]*j);
+//             const hLike_ptr_t __restrict__ hLike2_ptr = (hLike_ptr_t)(hLike_array->data + hLike_array->strides[0]*ind2 + hLike_array->strides[1]*j);
 
                                                                     
 
@@ -868,8 +869,8 @@ def add_processAllocedIBD_sumProduct(mod):
                             assert(!isnan(CPT(j, p0 ,p,h0,h1)));
                             //double CPT_V = CPT(j, p0 ,p,h0,h1);
                             //assert( (*CPT_ptr)[p0][p][h0][h1] == CPT_V);
-                            //p2p_V += CPT(j, p0 ,p,h0,h1) * h12p_V * h22p_V * p2p0_V;
-                            p2p_V += (*CPT_ptr)[p0][p][h0][h1]* h12p_V * h22p_V * p2p0_V;
+                            p2p_V += CPT(j, p0 ,p,h0,h1) * h12p_V * h22p_V * p2p0_V;
+                            //p2p_V += (*CPT_ptr)[p0][p][h0][h1]* h12p_V * h22p_V * p2p0_V;
                             assert(!isnan(p2p_V));
 
                          }
@@ -1115,7 +1116,7 @@ class c_ext:
         p2h2 =  allocedIBD["p2h2"]
         prevMeanSqrDiff =  allocedIBD["prevMeanSqrDiff"]
 
-        assert CPT.flags.c_contiguous, "CPT must be c-contiguous"
+        #assert CPT.flags.c_contiguous, "CPT must be c-contiguous"
         assert hLike.flags.c_contiguous, "CPT must be c-contiguous"
         if MAPestimate:
             return self._processAllocedIBD(ind1, ind2,  beginMarker,  endMarker, p2h1, p2h2,  prevMeanSqrDiff,hLike,CPT,dampF,firstCP2P)

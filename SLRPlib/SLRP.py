@@ -2193,8 +2193,7 @@ class longRangePhase:
    def iterateOverIBD(self,allocedIBD,iterations,intermedFAD=None,intermedIBD=None):
       goldStandard = False
 
-      allocedIBD = allocedIBD[allocedIBD["beginMarker"]<10]
-      self.CPT=numpy.ascontiguousarray(self.CPT)
+      #allocedIBD = allocedIBD[allocedIBD["beginMarker"]<10]
       #self.iterateOverIBDsum(allocedIBD,iterations,intermedFAD,intermedIBD)
       self.iterateOverIBDmax(allocedIBD,iterations,intermedFAD,intermedIBD,goldStandard)
       pass
