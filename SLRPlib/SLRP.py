@@ -718,6 +718,8 @@ class longRangePhase:
       self.set_mutation_rate()
       self.set_ibd_transition_limit()
 
+      
+
    def set_min_ibd_length(self,lim = 0):
       "Set the hard lower limit on IBD segment lengths. Cuts off problematic, very short IBD segments."
       self.minIBDlength = lim
@@ -730,7 +732,7 @@ class longRangePhase:
 
    def setIBDprob(self,ibd_prob):
       "Set the prior IBD probability"
-      assert 0<ibd_prob<1
+      assert 0 < ibd_prob < 0.25
       self.ibd_prob = ibd_prob
 
    def set_mutation_rate(self,mut_rate = 2 * 2.5e-8 *10000 ):
@@ -831,14 +833,17 @@ class longRangePhase:
       assert self.hLike is not None, "Likelihood table must be set up before breaking symmetries. Use initMessages()"
 
       indivsWithoutPhase = numpy.where(self.haplos.var(axis=2).max(axis=0) == 0.0)[0]
-      breakableSNPs = numpy.where(self.haplos[trimLength:,:,0].transpose()==2)
-      break_marker_indiv = numpy.array([hets.next() for (i,hets) in it.groupby(it.izip(*breakableSNPs),lambda x:x[0])],dtype=int)
-      break_marker_indiv[:,1]+=trimLength
-      
-      mask = numpy.in1d(break_marker_indiv[:,0], indivsWithoutPhase)
+      if len(indivsWithoutPhase) > 0 :
+         breakableSNPs = numpy.where(self.haplos[trimLength:,:,0].transpose()==2)
+         break_marker_indiv = numpy.array([hets.next() for (i,hets) in it.groupby(it.izip(*breakableSNPs),lambda x:x[0])],dtype=int)
+         break_marker_indiv[:,1]+=trimLength
 
-      self.hLike[break_marker_indiv[mask,0], break_marker_indiv[mask,1]] = self.logG_part["01"]
-      return sum(mask)
+         mask = numpy.in1d(break_marker_indiv[:,0], indivsWithoutPhase)
+
+         self.hLike[break_marker_indiv[mask,0], break_marker_indiv[mask,1]] = self.logG_part["01"]
+         return sum(mask)
+      else:
+         return 0
 
 
    def estimateZeroAlleleFrequencies(self, prior_beta_param = 1.0): # By default, one "fake" heterozygote individual.
@@ -1374,17 +1379,55 @@ class longRangePhase:
       scan over genotypes"""
 
       # hom 0, hom 1, het 2, missing 3
-   
-      self.geno = self.haplos.sum(axis=2)
-      # Phased hets
-      self.geno[self.geno == 1 ] = 4
-      # One missing
-      self.geno[ (self.haplos==3).any(axis=2) ] = 6
 
-      self.geno = self.geno.transpose()
-      self.geno /= 2
-      #self.geno = numpy.cast[numpy.int8](self.geno)
-      self.geno = numpy.ascontiguousarray(self.geno, dtype=numpy.int8)
+      if not hasattr(self,"geno"):
+         self.geno = self.haplos.sum(axis=2)
+         # Phased hets
+         self.geno[self.geno == 1 ] = 4
+         # One missing
+         self.geno[ (self.haplos==3).any(axis=2) ] = 6
+
+         self.geno = self.geno.transpose()
+         self.geno /= 2
+         #self.geno = numpy.cast[numpy.int8](self.geno)
+         self.geno = numpy.ascontiguousarray(self.geno, dtype=numpy.int8)
+
+
+   def computeLogLikeTableFromCPT(self):
+      """Compute the log likelihood table to be used in preprocessing"""
+      # LLtable[marker,genotype1, genotype2]
+      # genotypes hom 0, hom 1, het 2
+
+      printerr("Calculating log likelihoods from the IBD process. VERY PRELIMINARY. Doesn't work very well. ")
+      # Non IBD likelihoods with complete data
+      G00,Ghet,G11 = 0,2,1
+
+      L_pop_table = numpy.zeros( (self.markers,4,4) )
+      L_pop_table[:,0:3,0:3] = self.CPT[numpy.ix_(range(self.markers),[4],[4],[0,3,1],[0,3,1])].squeeze()
+
+      
+      
+      # IBD likelihoods with complete data
+      L_ibd_table = numpy.zeros( (self.markers,4,4) )
+      
+      
+      L_ibd_table[:,G00, G00 ] = self.CPT[:,0,0,0,0]
+      L_ibd_table[:,G00, Ghet] = self.CPT[:,0,0,0,2]
+      L_ibd_table[:,G00, G11 ] = numpy.inf
+      L_ibd_table[:,Ghet,G00 ] = self.CPT[:,0,0,2,0]
+      L_ibd_table[:,Ghet,Ghet] = -numpy.log( self.zeroAF * numpy.exp(-self.CPT[:,0,0,1,1]) + (1-self.zeroAF) * numpy.exp(-self.CPT[:,0,0,2,2]))
+      L_ibd_table[:,Ghet,G11 ] = self.CPT[:,0,0,1,3]
+      L_ibd_table[:,G11, G00 ] = numpy.inf
+      L_ibd_table[:,G11, Ghet] = self.CPT[:,0,0,3,1]
+      L_ibd_table[:,G11, G11 ] = self.CPT[:,0,0,3,3]
+
+
+
+      L_ibd_table[numpy.isinf(L_ibd_table)]=-numpy.log(self.errP)
+
+      self.LLtable = L_pop_table - L_ibd_table
+      
+      self.LLtable = numpy.cast[self.dataType](self.LLtable)
 
    def computeLogLikeTable(self):
       """Compute the log likelihood table to be used in preprocessing"""
@@ -1454,7 +1497,6 @@ class longRangePhase:
       assert self.LLtable.flags.c_contiguous, "LLtable array must be C-contiguous"
       peakThreshold = 4.0;
       dipThreshold = 12.0
-      
       debug = True
 
       ibd_regions = self.c_ext.LLscan(indPairs,self.geno,self.LLtable,peakThreshold,dipThreshold)
@@ -2191,12 +2233,15 @@ class longRangePhase:
       
       return totMeanSqrE
 
-   def iterateOverIBD(self,allocedIBD,iterations,intermedFAD=None,intermedIBD=None):
+   def iterateOverIBD(self,allocedIBD,iterations,intermedFAD=None,intermedIBD=None,use_max_product=True):
       goldStandard = False
 
       #allocedIBD = allocedIBD[allocedIBD["beginMarker"]<10]
-      #self.iterateOverIBDsum(allocedIBD,iterations,intermedFAD,intermedIBD)
-      self.iterateOverIBDmax(allocedIBD,iterations,intermedFAD,intermedIBD,goldStandard)
+      if use_max_product:
+         self.iterateOverIBDmax(allocedIBD,iterations,intermedFAD,intermedIBD,goldStandard)
+      else:
+         self.iterateOverIBDsum(allocedIBD,iterations,intermedFAD,intermedIBD)
+
       pass
 
    def iterateOverIBDsum(self,allocedIBD,iterations,intermedFAD=None,intermedIBD=None):
@@ -2219,7 +2264,7 @@ class longRangePhase:
       while  repeat<iterations:
          start_repeat_time=time.time()
          printerr("Repeat %d"%(repeat))
-         pdb.set_trace()
+         #pdb.set_trace()
 
 
 
@@ -2244,7 +2289,7 @@ class longRangePhase:
          try:
             improProp = errImpro * 100.0 / prevMeanSqrE
          except ZeroDivisionError:
-            raise
+            break
 
          printerr("Mean squared error for %dth repeat: %g (improvement %g,  %g%%)"%(repeat,totMeanSqrE, errImpro, improProp ))
          prevMeanSqrE = totMeanSqrE
@@ -2299,8 +2344,6 @@ class longRangePhase:
                prevBestMeanSqrE=totMeanSqrE
                countSinceBest=0
 
-               # Shuffle the update order. This should avoid overcommiting.
-         #random.shuffle(allocedIBD)
          self.ibdSegments=[]
          #self.ibd_regions = None
          printerr("Repeat %d"%(repeat))
@@ -2351,7 +2394,7 @@ class longRangePhase:
          try:
             improProp = errImpro * 100.0 / prevMeanSqrE
          except ZeroDivisionError:
-            raise
+            break
 
          printerr("Mean squared error for %dth repeat: %g (improvement %g,  %g%%)"%(repeat,totMeanSqrE, errImpro, improProp ))
          prevMeanSqrE = totMeanSqrE
@@ -2371,6 +2414,7 @@ class longRangePhase:
 
       printerr("Running last iteration and making IBD calls")
       # Making ibd calls
+      start_repeat_time=time.time()
       totMeanSqrE=0.0
       for ibdIdx,(ind1,ind2,beginM,endM,ca2h1,ca2h2,meanSqrD,_) in enumerate(allocedIBD):
          if ibdIdx%aboutPercent == 0:
@@ -2385,20 +2429,20 @@ class longRangePhase:
 
 
             #meanSqrD[0]=self.__computeOneIBD(ind1,ind2,beginM,endM,ca2h1,ca2h2, doUpdate = True, serializedPass = firstIteration )
-            meanSqrD[0]=self.__computeOneIBD(ind1,ind2,beginM,endM,ca2h1,ca2h2, doUpdate = True, serializedPass = firstIteration )
+         meanSqrD[0]=self.__computeOneIBD(ind1,ind2,beginM,endM,ca2h1,ca2h2, doUpdate = True, serializedPass = firstIteration )
 
-            firstIteration = False
-
-
-            if (ca2h1.shape[0] == (endM-beginM+1) ):
-               ind1, ind2 = int(ind1), int(ind2)
-               self.ibdSegments.extend((ind1+h1,ind2+h2,startM,stopM) \
-                                       for  h1,h2,startM,stopM in self.callCurIBD(beginM,endM))
+         firstIteration = False
 
 
+         if (ca2h1.shape[0] == (endM-beginM+1) ):
+            ind1, ind2 = int(ind1), int(ind2)
+            self.ibdSegments.extend((ind1+h1,ind2+h2,startM,stopM) \
+                                    for  h1,h2,startM,stopM in self.callCurIBD(beginM,endM))
 
 
-            totMeanSqrE+=meanSqrD[0] / len(allocedIBD)
+            
+         
+         totMeanSqrE+=meanSqrD[0] / len(allocedIBD)
       printerr("Final error: %g"%(totMeanSqrE))
       return totMeanSqrE
 
@@ -2430,9 +2474,9 @@ class longRangePhase:
       assert val >= 1.0, "The call threshold must not be less than one."
       self.callThreshold = val
       
-   def writeFAD(self,fname):
+   def writeFAD(self,fname,allow_inferred_genotypes=False):
       "Write current haplotypes to file fname in FAD format"
-      self.writeFADstrm(open(fname,"w"))
+      self.writeFADstrm(open(fname,"w"),allow_inferred_genotypes)
 
    def normalizedLike(self):
       "Return normalized max-margin posteriors ('likelihoods') in range [0-1]"
@@ -2476,7 +2520,7 @@ class longRangePhase:
       return phases
 
    
-   def writeFADstrm(self,outf):
+   def writeFADstrm(self,outf,allow_inferred_genotypes=False):
       "Call haplotypes from current likelihoods and write to file fname in FAD format"
       idx2phase = numpy.array([(0, 0), (1, 0), (0, 1), (1, 1), (2, 2)], dtype = numpy.int8)
 
@@ -2485,7 +2529,18 @@ class longRangePhase:
       # 1 = 10
       # 2 = 01
       # 3 = 11
-      posCalls = self.hLike.argmin(axis=2)
+      hLike = self.hLike
+      if not allow_inferred_genotypes:  # Only allow phase calls that are consistent with observed genotypes
+         self.computeGenos()
+         hLike = hLike.view(numpy.ma.MaskedArray)
+         hLike.fill_value = numpy.finfo(hLike.dtype).max
+         hLike.mask = numpy.zeros(hLike.shape, dtype=bool )
+         hLike.mask[self.geno==0] = numpy.array([False, True, True, True],dtype=bool )
+         hLike.mask[self.geno==1] = numpy.array([True, True, True, False],dtype=bool )
+         hLike.mask[self.geno==2] = numpy.array([True, False, False, True],dtype=bool )
+         #pdb.set_trace()
+         
+      posCalls = hLike.argmin(axis=2)
 
 
 
@@ -2811,7 +2866,7 @@ class longRangePhase:
       ibdRegions=[]
       newTime=time.time()
       startTime=newTime
-      
+
       self.computeGenos()
       self.computeLogLikeTable()
       
@@ -2868,9 +2923,16 @@ class longRangePhase:
       assert self.geno.strides[1] == 1, "Geno array must be indexable by first coordinate."
       assert self.LLtable.shape == (self.markers,4,4), "Badly shaped LL table"
       assert self.LLtable.flags.c_contiguous, "LLtable array must be C-contiguous"
-      peakThreshold = 4.0;
-      dipThreshold = 12.0
+      peakThreshold = self.LLtable.max() * 1.5;
+      dipThreshold = -self.LLtable.min() * 1.5;
+      #peakThreshold = numpy.log(4.0)
+      #dipThreshold = -numpy.log(self.errP**1.5)
+      printerr("Log Likelihood values range from %g to %g."%(self.LLtable.min(),self.LLtable.max()))
+      printerr("Calling IBD segments with LL score of at least %g containing no decrease of score %g."%(peakThreshold,dipThreshold))
+#      printerr("Naa.. Just kidding. I'm really calling IBD segments with LL score of at least %g."%(peakThreshold))
       #pdb.set_trace()
+      assert peakThreshold > 0
+      assert dipThreshold > 0
       if self.poolSize <= 1:
          ibdRegions=self.c_ext.LLscan_and_filter(0,self.indivs,self.geno,self.LLtable,peakThreshold,dipThreshold,min_cover,min_ibd_length )
       else:
@@ -2895,6 +2957,9 @@ class longRangePhase:
       printerr( "All pairs took %g mins"%( ( time.time() - startTime ) / 60.0 ))
       printerr("Using %d found putative IBD regions"%(ibdRegions.shape[0]))
 
+      # Shuffle the update order. This should avoid overcommiting and improve load balancing.
+      numpy.random.shuffle(ibdRegions)
+
 
       myStack = numpy.hstack(( ibdRegions[:,:2], numpy.reshape(ibdRegions[:,4],(-1,1)), ibdRegions[:,2:4], self.snpPos[ibdRegions[:,2:4]]) )
       self.ibd_regions = numpy.ascontiguousarray(myStack, dtype=numpy.int32)
@@ -2910,7 +2975,7 @@ class longRangePhase:
 
          
       
-   def phase(self,iterations=10,intFADbase=None,intIBDbase=None):
+   def phase(self,iterations=10,intFADbase=None,intIBDbase=None,use_max_product=True):
       "Compute the long range phase over IBD segments in allocedIBD"
 
       if iterations < 1:  # Don't do anything if there is nothing to do
@@ -2983,7 +3048,7 @@ class longRangePhase:
                                                                                     len(allocedIBD), firstBase, min(self.markers, lastBase) ))
 
          if self.poolSize <= 1:
-            self.iterateOverIBD(allocedIBD,iterations,intermedFAD=intFADbase,intermedIBD=intIBDbase)
+            self.iterateOverIBD(allocedIBD,iterations,intermedFAD=intFADbase,intermedIBD=intIBDbase,use_max_product=use_max_product)
          else:
             # Threading
             chunkSize = int( len(allocedIBD) * 1.0 / self.poolSize + 1) 

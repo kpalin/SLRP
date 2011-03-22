@@ -97,42 +97,23 @@ for(int i1=from_indiv; i1 < to_indiv ; i1++) {
     cum_value = 0.0,max_value = 0.0;
     int low_idx = 0, peak_idx = 0;
     int idx = 0;
+#define USE_DECREASE_LIMIT 1
+
     while(LLptr < LLendPtr) {
        value = *(LLptr + (*g1)*G1stride + (*g2)*G2stride);
        cum_value += value;
 
 
-       /*
-       // Alternative, more straightforward but slower way
-       %(cType)s altValue;
-       char altg1,altg2;
-       altg1=genos(i1,idx);
-       altg2=genos(i2,idx);
-       altValue = LLtable(idx,(int)altg1,(int)altg2);
-       if (PyErr_Occurred()) {
-       return_val = 2;  // propagate error 
-       goto loopBreak;
-    } 
-       if(abs(value-altValue)>-0.1) {
-           std::cerr<<"err: " << idx <<" "
-                    <<value<<" "<<altValue
-                    <<" "
-                    <<(int)altg1<<(int)altg2
-                    <<" xxx "
-                    <<(int)*g1<<(int)*g2 <<std::endl;
-           //PY_END_ALLOW_THREADS;
-           //goto loopBreak;
-       } else {
-          //std::cerr<<".";
-       } 
-       // Slow way ending
-       */
-
        if( cum_value > max_value) {
            max_value = cum_value;
            peak_idx = idx;
-       } else if( cum_value < (max_value - dipLimit)  || cum_value < 0.0) {
-              if(max_value > lowLimit ) {  // Gone past a high peak
+       } else
+#ifdef USE_DECREASE_LIMIT
+       if( cum_value < (max_value - dipLimit)  || cum_value < 0.0) {
+#else
+           if( cum_value < 0.0) {
+#endif
+              if(max_value > lowLimit && (peak_idx-low_idx) >= min_length  ) {  // Gone past a high peak
                   //std::cerr<< "High: ";
                   ibd_region_type high_reg;
                   high_reg.i1 = std::min(i1,i2)*2;
@@ -142,27 +123,22 @@ for(int i1=from_indiv; i1 < to_indiv ; i1++) {
                   high_reg.score=(int)max_value;
                   ibd_regions.push_back(high_reg);
                   std::push_heap(ibd_regions.begin(),ibd_regions.end());
-                  //ibdRegions->push_back(i1 * 2);
-                  //ibdRegions->push_back(i2 * 2);
-                  //ibdRegions->push_back(low_idx);
-                  //ibdRegions->push_back(peak_idx);
-                  //ibdRegions->push_back((int)max_value); 
 
-                  /*
-                  kv_push(int,ibdRegions,i1 * 2);
-                  kv_push(int,ibdRegions,i2 * 2);
-                  kv_push(int,ibdRegions,low_idx);
-                  kv_push(int,ibdRegions,peak_idx);
-                  kv_push(int,ibdRegions,(int)max_value);
-                  */
-                  
-                  //std::cerr<< peak_idx-low_idx << " : " << low_idx << "-" << peak_idx << " " << max_value <<" : " << cum_value <<std::endl;
-                  //if(ibdRegions->size() > 20) { goto loopBreak;}
-                  //if(peak_idx>700) {goto loopBreak;}
-                  //if(kv_size(ibdRegions) > 20) { goto loopBreak;}
+#ifdef USE_DECREASE_LIMIT
               }
-              // Reset peak tracking
               low_idx = peak_idx = idx;
+#else
+                  // Found a peak. Now find an other one, after that
+                  LLptr -= (idx-peak_idx)*LLstride;
+                  g1 -= (idx-peak_idx);
+                  g2 -= (idx-peak_idx);
+                  idx = low_idx = peak_idx;
+              } else {
+                 // Reset peak tracking
+                  low_idx = peak_idx = idx;
+              }
+#endif
+              
               max_value = cum_value = 0.0;
        }
               
@@ -173,7 +149,7 @@ for(int i1=from_indiv; i1 < to_indiv ; i1++) {
        g2++;
     }
     
-    if(max_value > lowLimit ) {  // Gone past a high peak
+    if(max_value > lowLimit  && (peak_idx-low_idx) >= min_length ) {  // Gone past a high peak
          ibd_region_type high_reg;
          high_reg.i1 = i1*2;
          high_reg.i2 = i2*2;
@@ -182,12 +158,6 @@ for(int i1=from_indiv; i1 < to_indiv ; i1++) {
          high_reg.score=(int)max_value;
          ibd_regions.push_back(high_reg);
          std::push_heap(ibd_regions.begin(),ibd_regions.end());
-         //std::cerr<< "High: ";
-         //ibdRegions->push_back(i1 * 2);
-         //ibdRegions->push_back(i2 * 2);
-         //ibdRegions->push_back(low_idx);
-         //ibdRegions->push_back(peak_idx);
-         //ibdRegions->push_back((int)max_value);
     }
   }
     // Now filter 
@@ -1419,10 +1389,10 @@ def build_c_scan_ext():
     #pdb.set_trace()
     mod.customize.add_extra_compile_arg("-g")
     mod.customize.add_extra_compile_arg("-Wall")
-    mod.customize.add_extra_compile_arg("-O3")
+    #mod.customize.add_extra_compile_arg("-O3")
     #mod.customize.add_extra_compile_arg("-ftree-vectorizer-verbose=3")
     mod.customize.add_extra_compile_arg("-DNIBDFILTERDEBUG")
-    mod.customize.add_extra_compile_arg("-DNDEBUG")
+    mod.customize.add_extra_compile_arg("-UNDEBUG")
     mod.compile(verbose=2,location = os.path.dirname(__file__))
 
 try:
@@ -1478,5 +1448,4 @@ class c_ext:
         if MAPestimate:
             return self._processAllocedIBD(ind1, ind2,  beginMarker,  endMarker, p2h1, p2h2,  prevMeanSqrDiff,hLike,CPT,dampF,firstCP2P)
         else:
-            dampF = 1.0
             return self._processAllocedIBD_sumProduct(ind1, ind2,  beginMarker,  endMarker, p2h1, p2h2,  prevMeanSqrDiff,hLike,CPT,dampF,firstCP2P)
