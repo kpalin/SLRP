@@ -123,7 +123,7 @@ def process_args():
                      metavar="NUM",default=10 )
 
    parser.add_option("", "--IBDcoverLimit", dest="ibdCoverLimit",type="int",
-                     help="Soft lower limit for number of IBD sharing. Only do message passing on the longest NUM segments covering a locus. The selection is greedy, hence there might be more than minimum number of segments used. Non positive limits turn off this limit. [default: %default]", metavar="NUM",default=15 )
+                     help="Soft lower limit for number of IBD sharing. Only do message passing on the longest NUM segments covering a locus. The selection is greedy, hence there might be more than minimum number of segments used. Non positive limits turn off this limit. [default: %default]", metavar="NUM",default=5 )
 
 
    parser.add_option("", "--use_sum_product", dest="use_max_product",action="store_false",
@@ -363,6 +363,7 @@ def main():
                intIBD="%s_%%d"%(options.ibdSegmentCalls)
 
 
+         #trimLength = rlp.markers/2 if options.slice_length <= 0 else options.slice_length/2
          if options.loadLikelihoods is not None:
             printerr("Loading initial likelihoods from",options.loadLikelihoods)
             try:
@@ -370,11 +371,12 @@ def main():
             except IOError,e:
                printerr(str(e))
                return False
+         else:
+            trimLength = max(options.minIBDlength*2,0)
+            printerr("Breaking phase symmetries with the het after %dth SNP!"%(trimLength))
+            printerr("Broke phase symmetry for %d individuals"%(rlp.breakPhaseSymmetry(trimLength)))
 
-         #trimLength = rlp.markers/2 if options.slice_length <= 0 else options.slice_length/2
-         trimLength = max(options.minIBDlength*2,0)
-         printerr("Breaking phase symmetries with the het after %dth SNP!"%(trimLength))
-         printerr("Broke phase symmetry for %d individuals"%(rlp.breakPhaseSymmetry(trimLength)))
+
 
 
       rlp.set_slice_len(options.slice_length)

@@ -914,15 +914,16 @@ class longRangePhase:
 
       hetNoiseLevel = 1e-3
 
-      self.maxNoise = numpy.log(1.0 + hetNoiseLevel) - numpy.log(1.0 - hetNoiseLevel)
-      printerr("Breaking symmetries randomly with additive +-%g noise in log likelihood space!"%(self.maxNoise) )
-      
-      state01 = self.hLike[:,:,1] # No copy, just a view
-      noiseFactor = numpy.random.uniform(low = 1.0 - hetNoiseLevel, high = 1.0 + hetNoiseLevel, size = state01.shape)
-      noiseFactor[state01 != self.logG_part["22"][1]] = 1.0
+      if False:
+         self.maxNoise = numpy.log(1.0 + hetNoiseLevel) - numpy.log(1.0 - hetNoiseLevel)
+         printerr("Breaking symmetries randomly with additive +-%g noise in log likelihood space!"%(self.maxNoise) )
 
-      self.hLike[:, :, 1] += numpy.log(noiseFactor)
-      self.hLike[:, :, 2] += numpy.log(2-noiseFactor)
+         state01 = self.hLike[:,:,1] # No copy, just a view
+         noiseFactor = numpy.random.uniform(low = 1.0 - hetNoiseLevel, high = 1.0 + hetNoiseLevel, size = state01.shape)
+         noiseFactor[state01 != self.logG_part["22"][1]] = 1.0
+
+         self.hLike[:, :, 1] += numpy.log(noiseFactor)
+         self.hLike[:, :, 2] += numpy.log(2-noiseFactor)
       
 
 
@@ -1393,7 +1394,7 @@ class longRangePhase:
          self.geno = numpy.ascontiguousarray(self.geno, dtype=numpy.int8)
 
 
-   def computeLogLikeTableFromCPT(self):
+   def computeLogLikeTable(self):
       """Compute the log likelihood table to be used in preprocessing"""
       # LLtable[marker,genotype1, genotype2]
       # genotypes hom 0, hom 1, het 2
@@ -1429,7 +1430,7 @@ class longRangePhase:
       
       self.LLtable = numpy.cast[self.dataType](self.LLtable)
 
-   def computeLogLikeTable(self):
+   def computeLogLikeTable_directLogLike(self):
       """Compute the log likelihood table to be used in preprocessing"""
       # LLtable[marker,genotype1, genotype2]
       # genotypes hom 0, hom 1, het 2
@@ -2264,7 +2265,6 @@ class longRangePhase:
       while  repeat<iterations:
          start_repeat_time=time.time()
          printerr("Repeat %d"%(repeat))
-         #pdb.set_trace()
 
 
 
@@ -2317,7 +2317,7 @@ class longRangePhase:
       "Do the phasing proper, with the min-sum algorithm, trying to find most likely phase"
       
       totMeanSqrE=prevBestMeanSqrE=2e9
-      countSinceBest=0
+
       repeatCount=it.count(0)
       repeat=repeatCount.next()
       #for repeat in xrange(iterations):
@@ -2332,17 +2332,17 @@ class longRangePhase:
       #self.setDamping(0.0)
       __dampF = 0.0
 
+      sOrder = allocedIBD.argsort(order=["endMarker"])[::-1]
+      allocedIBD = allocedIBD[sOrder]
+      sOrder = allocedIBD.argsort(order=["beginMarker"])
+      allocedIBD = allocedIBD[sOrder]
+
       while  repeat<iterations:
 
          start_repeat_time=time.time()
+         #allocedIBD = allocedIBD[numpy.random.permutation(len(allocedIBD))]
 
-         # Repeat for four times after latest improvement
-         if repeat>3: # Damping causes silly things.
-            if totMeanSqrE>prevBestMeanSqrE:
-               countSinceBest+=1
-            else:
-               prevBestMeanSqrE=totMeanSqrE
-               countSinceBest=0
+
 
          self.ibdSegments=[]
          #self.ibd_regions = None
@@ -2374,7 +2374,6 @@ class longRangePhase:
             totMeanSqrE = self.processAllocedIBD(allocedIBD,MAPestimate=True)
             totMeanSqrE /= len(allocedIBD)
 
-         #pdb.set_trace()
 
          if intermedFAD is not None:
             try:
@@ -2444,6 +2443,7 @@ class longRangePhase:
          
          totMeanSqrE+=meanSqrD[0] / len(allocedIBD)
       printerr("Final error: %g"%(totMeanSqrE))
+#      pdb.set_trace()
       return totMeanSqrE
 
 
@@ -2461,14 +2461,16 @@ class longRangePhase:
 
 
    def callQual(self):
-      "Return the phase call quality scores. i.e. base e log of posterior probability ratios between the two phases."
-      return self.hLike[:,:,1:3].ptp(axis=2)
+      "Return the call quality scores, i.e. base e log of posterior probability ratios between the two most likely calls"
+      return numpy.sort(self.hLike,axis=-1)[:,:,:2].ptp(axis=2)
+      # "Return the phase call quality scores. i.e. base e log of posterior probability ratios between the two phases."
+      #return self.hLike[:,:,1:3].ptp(axis=2)
 
 
 
    def writeQual(self,fname):
       "Write call qualities (in base 10) to the given file."
-      numpy.savetxt( fname, self.callQual()/np.log(10.0), fmt="%g", delimiter="\t" )
+      numpy.savetxt( fname, self.callQual()/numpy.log(10.0), fmt="%g", delimiter="\t" )
 
    def setCallThreshold(self,val):
       assert val >= 1.0, "The call threshold must not be less than one."
@@ -2538,7 +2540,7 @@ class longRangePhase:
          hLike.mask[self.geno==0] = numpy.array([False, True, True, True],dtype=bool )
          hLike.mask[self.geno==1] = numpy.array([True, True, True, False],dtype=bool )
          hLike.mask[self.geno==2] = numpy.array([True, False, False, True],dtype=bool )
-         #pdb.set_trace()
+
          
       posCalls = hLike.argmin(axis=2)
 
@@ -2923,14 +2925,14 @@ class longRangePhase:
       assert self.geno.strides[1] == 1, "Geno array must be indexable by first coordinate."
       assert self.LLtable.shape == (self.markers,4,4), "Badly shaped LL table"
       assert self.LLtable.flags.c_contiguous, "LLtable array must be C-contiguous"
-      peakThreshold = self.LLtable.max() * 1.5;
+      peakThreshold = self.LLtable.max();
       dipThreshold = -self.LLtable.min() * 1.5;
-      #peakThreshold = numpy.log(4.0)
-      #dipThreshold = -numpy.log(self.errP**1.5)
+      peakThreshold = numpy.log(4.0)
+      dipThreshold = 1000.0
       printerr("Log Likelihood values range from %g to %g."%(self.LLtable.min(),self.LLtable.max()))
       printerr("Calling IBD segments with LL score of at least %g containing no decrease of score %g."%(peakThreshold,dipThreshold))
 #      printerr("Naa.. Just kidding. I'm really calling IBD segments with LL score of at least %g."%(peakThreshold))
-      #pdb.set_trace()
+
       assert peakThreshold > 0
       assert dipThreshold > 0
       if self.poolSize <= 1:
@@ -3018,14 +3020,15 @@ class longRangePhase:
 
 
          toAllocIBD = (self.ibd_regions[x] for x in toAllocIBDindicator.nonzero()[0])
+         overhang = 10
          newIBD = numpy.array( [(int(x["ind1"] - x["ind1"] % 2),
                                     int(x["ind2"] - x["ind2"] % 2), 
-                                    int(max(0, int(x["beginM"]) - 10)),
-                                    int(min(self.markers-1, int(x["endM"]) + 10, lastBase)), 
-                                    numpy.zeros((min(self.markers-1,x["endM"] + 10) - max(0, x["beginM"] - 10) + 1, 4), dtype = self.dataType),
-                                    numpy.zeros((min(self.markers-1,x["endM"] + 10) - max(0, x["beginM"] - 10) + 1, 4), dtype = self.dataType),
+                                    int(max(0, int(x["beginM"]) - overhang)),
+                                    int(min(self.markers-1, int(x["endM"]) + overhang, lastBase)), 
+                                    numpy.zeros((min(self.markers-1,x["endM"] + overhang) - max(0, x["beginM"] - overhang) + 1, 4), dtype = self.dataType),
+                                    numpy.zeros((min(self.markers-1,x["endM"] + overhang) - max(0, x["beginM"] - overhang) + 1, 4), dtype = self.dataType),
                                     numpy.array([1e99], dtype = self.dataType),
-                                    min(self.markers-1, int(x["endM"]) + 10 ) ) \
+                                    min(self.markers-1, int(x["endM"]) + overhang ) ) \
                                    for  x in toAllocIBD ] ,
                                   dtype = self.allocedIBD_dtype)
          printerr("RSS after allocations: %g GB"%(resident()*2.0**(-30)))

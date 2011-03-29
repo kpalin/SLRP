@@ -834,9 +834,9 @@ def add_processAllocedIBD(mod):
 
     code="#line %d \"scanTools.py\""%(tools.lineno()+1) + """
 
-//#ifndef NDEBUG
+#ifndef NDEBUG
     std::cout<<"function: "<<__func__<<std::endl;
-//#endif
+#endif
 
     int ij,j;
     int h0,h1,p,p1;
@@ -1392,7 +1392,7 @@ def build_c_scan_ext():
     #mod.customize.add_extra_compile_arg("-O3")
     #mod.customize.add_extra_compile_arg("-ftree-vectorizer-verbose=3")
     mod.customize.add_extra_compile_arg("-DNIBDFILTERDEBUG")
-    mod.customize.add_extra_compile_arg("-UNDEBUG")
+    mod.customize.add_extra_compile_arg("-DNDEBUG")
     mod.compile(verbose=2,location = os.path.dirname(__file__))
 
 try:
