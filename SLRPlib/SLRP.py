@@ -667,6 +667,36 @@ class ThreadBarrier:
       self.cv.release()
    
 
+
+class IBD_diplotype_codes:
+   # IBD and diplotype codes
+   # ibdXY  == IBD on haplotypes where this or previous heterozygote had allele X on individual 1 and Y on individual 2
+   ibd11 = 0
+   ibd10 = 1
+   ibd01 = 2
+   ibd00 = 3
+   noIBD = 4
+   # Diplotype codes with switch encoding
+   hHom0 = 0
+   # hHetEq == Heterozygote with same phase as the previous heterozygote
+   hHetEq = 1
+   # hHetSw == Heterozygote with opposite (switch) phase as the previous heterozygote
+   hHetSw = 2
+   hHom1 = 3
+
+   # Diplotype codes with direct encoding
+   h00 = 0
+   h10 = 1
+   h01 = 2
+   h11 = 3
+
+   # pXY == IBD on X:th haplotype on individual 1 and Y:th haplotype on individual 2
+   p00 = 0
+   p10 = 1
+   p01 = 2
+   p11 = 3
+   pNone = 4
+   
 class longRangePhase:
    __mean_recomb_rate = 1.5e-6 # Mean rcombination rate 1.5cM/Mbp
    
@@ -832,15 +862,18 @@ class longRangePhase:
       "Break symmetries on individuals that don't have any phase information from FAD file. Set one of the heterozygotes after beginning of the ibdSegments to phased state."
       assert self.hLike is not None, "Likelihood table must be set up before breaking symmetries. Use initMessages()"
 
-      indivsWithoutPhase = numpy.where(self.haplos.var(axis=2).max(axis=0) == 0.0)[0]
+      indivsWithoutPhase = numpy.logical_and( (self.haplos[:,:,0]==2).any(axis=0), # Have to have an unphased het
+                                              (self.haplos[:,:,0]==self.haplos[:,:,1]).all(axis=0)) # All sites have to be unphased
+      indivsWithoutPhase = numpy.where(indivsWithoutPhase)[0]
       if len(indivsWithoutPhase) > 0 :
          breakableSNPs = numpy.where(self.haplos[trimLength:,:,0].transpose()==2)
          break_marker_indiv = numpy.array([hets.next() for (i,hets) in it.groupby(it.izip(*breakableSNPs),lambda x:x[0])],dtype=int)
+         
          break_marker_indiv[:,1]+=trimLength
 
          mask = numpy.in1d(break_marker_indiv[:,0], indivsWithoutPhase)
 
-         self.hLike[break_marker_indiv[mask,0], break_marker_indiv[mask,1]] = self.logG_part["01"]
+         self.hLike[break_marker_indiv[mask,0], break_marker_indiv[mask,1]] = self.logG_part["10"]
          return sum(mask)
       else:
          return 0
@@ -914,7 +947,7 @@ class longRangePhase:
 
       hetNoiseLevel = 1e-3
 
-      if False:
+      if True:
          self.maxNoise = numpy.log(1.0 + hetNoiseLevel) - numpy.log(1.0 - hetNoiseLevel)
          printerr("Breaking symmetries randomly with additive +-%g noise in log likelihood space!"%(self.maxNoise) )
 
@@ -1058,18 +1091,7 @@ class longRangePhase:
 
       printerr(rateMat5)
 
-      if False:
-         snpDists=[0.0] + [nextPos-prevPos for prevPos,nextPos in it.izip(self.snpCMpos,
-                                                                          self.snpCMpos[1:])]
-
-
-
-         snpDists = numpy.ones(len(self.snpCMpos)) * mean_cm_dist
-
-         printerr("Assuming equidistant markers spaced every %g cM! Length of the chromosome is %g cM"%(mean_cm_dist,mean_cm_dist * self.markers))
-      else:
-         snpDists = numpy.concatenate( ([0.0], numpy.diff(self.snpCMpos)))
-
+      snpDists = numpy.concatenate( ([100.0], numpy.diff(self.snpCMpos)))
       mean_cm_dist = self.snpCMpos[-1]/len(self.snpCMpos)
 
       expected_nonIBD_snps = -1.0/(rateMat5[4,4]*mean_cm_dist)
@@ -1085,43 +1107,39 @@ class longRangePhase:
       if mean_cm_dist < 1e-5:
          printerr("The SNPs are spaced on average %gcM from each other, which is very close. Are you absolutely sure that everything is right?"%(mean_cm_dist))
 
-      #snpDists=numpy.ones(len(self.snpCMpos))*10
+
       # CPT[marker,p_j-1,p_j,hi,hi']
 
       # CPT[marker,p_marker-1,p_marker,hi,hi'] = P(p_marker|p_marker-1)
-      self.CPT = numpy.dstack( scipy.linalg.expm(snpDist*rateMat5) for snpDist in snpDists )
+      # transProb[marker, p_{marker - 1}, p_marker ] =  P( p_marker | p_{marker-1} )
+      transProb = numpy.dstack( scipy.linalg.expm(snpDist*rateMat5) for snpDist in snpDists ) 
+      transProb = transProb.transpose((2,0,1))
+
+      assert numpy.allclose(transProb.sum(axis=2),1.0)
+
 
       
-
-      # TODO: NEEDS TESTING  Tue Jun 08 10:13:21 BST 2010 
-
-
-      limFactor = self.CPT[4,4,:] / (1.0 - self.IBDtransProbLimit)
-
-      limMarkerCount = (limFactor<1.0).sum()
-      printerr("Limiting non IBD to IBD transition probability to %g for %g%% (%d) of markers."%(self.IBDtransProbLimit, limMarkerCount*100.0 / self.CPT.shape[2], limMarkerCount))
-      self.CPT[4,4,limFactor < 1.0 ] = 1.0 - self.IBDtransProbLimit
-      self.CPT[4,0:4,limFactor < 1.0] = self.IBDtransProbLimit / 4.0
-      
-
-      # END TODO
-
-      self.CPT = numpy.array( self.CPT.transpose((2,0,1)), dtype = self.dataType )
-      assert numpy.allclose(self.CPT.sum(axis=2),1.0)
+      # P(ha,hb|pm,pm-1)
+      # ha, hb \in {hom 0,
+      #             het with same phase as previous het,
+      #             het with opposite phase as previous het,
+      #             hom 1}
+      #
+      # pm,pm-1 \in { IBD on haplotypes with previous (inclusive) het 1 on (a) and 1 on (b),
+      #               IBD on haplotypes with previous (inclusive) het 1 on (a) and 0 on (b),
+      #               IBD on haplotypes with previous (inclusive) het 0 on (a) and 1 on (b),
+      #               IBD on haplotypes with previous (inclusive) het 0 on (a) and 0 on (b),
+      #               not IBD }
 
 
 
-
-      #self.zeroAF[0]=0.25
       def TESTBIT(x,b):
-          return (x&(1<<b))
+         return (x&(1<<b))
       
       def GETBIT(x,b):
-          return (x&(1<<b))>>b
+         return (x&(1<<b))>>b
        
 
-
-       
       def CAgivenGeno2(j,h0,h1,phase):
           "P(h0,h1|phase,f)"
 
@@ -1153,40 +1171,32 @@ class longRangePhase:
 
           assert(False)
 
+       
+
+
      
-      assert numpy.allclose(self.CPT.sum(axis=2),1.0)
+
+      # alt_CAj[m,pm-1,pm,ha,hb] =  P(ha,hb|pm,pm-1)
 
       alt_CAj=numpy.fromiter( (CAgivenGeno2(j,h1,h2,p) for j,p,h1,h2 in product( xrange(self.markers),
-                                                                                      xrange(5),xrange(4),
-                                                                                      xrange(4))),
-                                   dtype = self.dataType)
-      alt_CAj.shape = (self.markers,1,5,4,4)
-      #self.L_pop_table = alt_CAj[:,0,4]
-      #self.L_ibd_table = alt_CAj[:,0,0]
-
-
-      # Following is a bad idea about controlling the unobserved IBS
-#       snpBPdists=numpy.array([0] + [nextPos-prevPos for prevPos,nextPos in it.izip(self.snpPos,
-#                                                                                    self.snpPos[1:])])
-#       prob_IBS_prior = numpy.exp(-numpy.array(snpBPdists)*1e-6)
-#       prob_IBS_prior.shape = (-1,1,1)
-#       tmp_CPT = self.CPT[:,:,:4]*numpy.tile(prob_IBS_prior,(1,5,4))
-#       lastCol = 1 - tmp_CPT.sum(axis=2)
-      
-#       self.CPT = numpy.dstack((tmp_CPT,lastCol))
-
-
+                                                                                             xrange(5),
+                                                                                             xrange(4),
+                                                                                             xrange(4)
+                                                                                             )
+                               ),dtype = self.dataType)
       alt_CAj = numpy.tile(alt_CAj,(1,5,1,1,1))
+      alt_CAj.shape = (self.markers,5,5,4,4)
+
       assert numpy.allclose(alt_CAj.sum(axis=4).sum(axis=3),1.0)
-
       
-      self.CPT.shape = (-1,5,5,1,1)
-      self.CPT = numpy.tile(self.CPT,(1,1,1,4,4))
-
       
-      assert numpy.allclose(self.CPT.sum(axis=2),1.0)
+      transProb.shape = (-1,5,5,1,1)
+      transProb = numpy.tile(transProb,(1,1,1,4,4))
 
-      assert self.CPT.shape == alt_CAj.shape
+
+      assert numpy.allclose(transProb.sum(axis=2),1.0)
+      
+      assert transProb.shape == alt_CAj.shape
 
 
       self.firstCP2P = numpy.array([self.ibd_prob, self.ibd_prob, self.ibd_prob, self.ibd_prob, 1.0-4.0*self.ibd_prob],dtype=self.dataType)
@@ -1196,15 +1206,15 @@ class longRangePhase:
       printerr("firstcp2p : ",numpy.exp(-self.firstCP2P))
 
 
-      self.CPT[0,:,0:4,:] = self.ibd_prob
-      self.CPT[0,:,4,:] = 1-4*self.ibd_prob
+#       self.CPT[0,:,0:4,:] = self.ibd_prob
+#       self.CPT[0,:,4,:] = 1-4*self.ibd_prob
 
 
-      
 
-      # self.CPT[j,p_j-1,p_j,hj0,hj1] = log( P(p_j|p_j-1) * P(hj0,hj1|p_j) )
-      self.CPT = (self.CPT * alt_CAj)
+      # self.CPT[j,p_j-1,p_j,hj0,hj1] = P(p_j|p_j-1) * P(hj0,hj1|p_j,p_j-1) 
+      self.CPT = (transProb * alt_CAj)
 
+#      pdb.set_trace()
       ## Marginalise properly 
       assert numpy.allclose( self.CPT.sum(axis=4).sum(axis=3).sum(axis=2), 1.0)
 
@@ -1220,21 +1230,209 @@ class longRangePhase:
 
 
       # self.CPT[marker, p_j-1, p_j, hj0, hj1] = -log( P(pj | p_j-1, hj0, hj1) )
-      #assert numpy.allclose(numpy.array(list(set(float(x) for x in lopulta.sum(axis=2).flat)-set([0]))),1.0)
+
+                             #assert numpy.allclose(numpy.array(list(set(float(x) for x in lopulta.sum(axis=2).flat)-set([0]))),1.0)
 
       self.CPT = numpy.empty(cptS.shape,dtype=self.dataType).transpose((0,2,1,3,4))
       
       self.CPT[:] = -cptS
+      assert numpy.allclose(numpy.exp(-self.CPT).sum(axis=2),1.0)
 
 
-      p3ibd = numpy.exp(-self.CPT[:,4,:,0,0])
-      likelyIBD = p3ibd[:,0]>p3ibd[:,4]
-      printerr("Total %d sites are IBD just by IBS due to allele frequency and genetic distance to neighbours\n"%(likelyIBD.sum()))
+      #p3ibd = numpy.exp(-self.CPT[:,4,:,0,0])
+      #likelyIBD = p3ibd[:,0]>p3ibd[:,4]
+      #printerr("Total %d sites are IBD just by IBS due to allele frequency and genetic distance to neighbours\n"%(likelyIBD.sum()))
+
+                       
+
+      c=IBD_diplotype_codes
+      self.computeLogLikeTable_notForSwitchesAsOf31March2011()
+      # Now shuffle the CPT values to work with the switch diplotype encoding.
+      oldCPT = self.CPT
+      self.CPT = numpy.ones(self.CPT.shape,dtype=self.dataType)
 
 
+      for pPrev,p,h1,h2 in product( xrange(5),xrange(5),
+                                    xrange(4), xrange(4)):
 
+         #
+         partCPT = oldCPT[self._new2oldCode(h1,h2,p,pPrev)]
+
+         if len(partCPT.shape) == 2:
+            self.CPT[:,pPrev,p,h1,h2] = -numpy.log(numpy.exp(-partCPT).mean(axis=1))
+         elif len(partCPT.shape) == 1:
+            self.CPT[:,pPrev,p,h1,h2] = partCPT
+         else:
+            raise "You shouldn't be here"
+            
+
+      self.firstCP2P -= self.firstCP2P.min()
+      #self.firstCP2P = self.CPT[0,4,:].min(axis=1).min(axis=1)
+
+      pCPT = numpy.exp(-self.CPT)
+      assert numpy.allclose(pCPT.sum(axis=2),1.0)
+
+
+                                  
+      assert numpy.allclose(pCPT[:,c.noIBD,c.ibd00,c.hHom0,c.hHom0],
+                            pCPT[:,c.noIBD,c.ibd11,c.hHom0,c.hHom0])
+      assert numpy.allclose(pCPT[:,c.noIBD,c.ibd00,c.hHom1,c.hHom1],
+                            pCPT[:,c.noIBD,c.ibd11,c.hHom1,c.hHom1])
+      assert numpy.allclose(pCPT[:,c.noIBD,c.ibd00,c.hHetEq,c.hHom1],
+                            pCPT[:,c.noIBD,c.ibd00,c.hHetSw,c.hHom1])
+      assert numpy.allclose(pCPT[:,c.noIBD,c.ibd01,c.hHetEq,c.hHom1],
+                            pCPT[:,c.noIBD,c.ibd01,c.hHetSw,c.hHom1])
+      assert numpy.allclose(pCPT[:,c.noIBD,c.ibd10,c.hHetEq,c.hHom1],
+                            pCPT[:,c.noIBD,c.ibd10,c.hHetSw,c.hHom1])
+      assert numpy.allclose(pCPT[:,c.noIBD,c.ibd00,c.hHetEq,c.hHetEq],
+                            pCPT[:,c.noIBD,c.ibd00,c.hHetSw,c.hHetSw])
+      assert numpy.allclose(pCPT[:,c.noIBD,c.ibd11,c.hHetEq,c.hHetEq],
+                            pCPT[:,c.noIBD,c.ibd11,c.hHetSw,c.hHetSw])
+      assert numpy.allclose(pCPT[:,c.noIBD,c.ibd11,c.hHetEq,c.hHetSw],
+                            pCPT[:,c.noIBD,c.ibd11,c.hHetSw,c.hHetEq])
+      
       assert numpy.allclose(numpy.exp(-self.CPT[1:,]).sum(axis=2),1.0)
 
+      #pdb.set_trace()
+
+   def _new2oldCode(self,new_h0,new_h1,new_phase, new_prevPhase):
+      """remap "old" CPT to new coding"""
+
+
+      # Assume that at previous position, there was 10 heterozygote
+      # Now new_h equals old_h and new_prevPhase equals old_prevPhase as per definition
+      c = IBD_diplotype_codes
+
+      if new_prevPhase == 2 and new_h0 == 1 and new_h1 == 0:
+         #opdb.set_trace()
+         pass
+
+#      if new_h0 in (c.hHetEq,c.hHetSw):
+#         old_h0 = 3 - new_h0
+#      else:
+      old_h0 = new_h0
+
+#      if new_h1 in (c.hHetEq,c.hHetSw):
+#         old_h1 = 3 - new_h1
+#      else:
+      old_h1 = new_h1
+
+      if new_prevPhase == c.ibd11:
+         old_prevPhase = c.p00
+      elif new_prevPhase == c.ibd10:
+         old_prevPhase = c.p01
+      elif new_prevPhase == c.ibd01:
+         old_prevPhase = c.p10
+      elif new_prevPhase == c.ibd00:
+         old_prevPhase = c.p11
+      elif new_prevPhase == c.noIBD:
+         old_prevPhase = c.pNone
+      else:
+         raise "Don't come here!"
+
+      #pdb.set_trace()
+      if False and  new_prevPhase == c.noIBD:
+         phaseMap2IBD = { (c.h00, c.h11) : (c.p00,c.p01,c.p10,c.p11,c.pNone),  # Opposite homs. Makes no difference.
+                          (c.h11, c.h00) : (c.p00,c.p01,c.p10,c.p11,c.pNone),
+                          # Heterozygotes: only one option
+                          (c.h10, c.h10) : (c.p00,c.p01,c.p10,c.p11,c.pNone),
+                          (c.h10, c.h01) : (c.p01,c.p00,c.p11,c.p10,c.pNone),
+                          (c.h01, c.h10) : (c.p10,c.p11,c.p00,c.p01,c.pNone),
+                          (c.h01, c.h01) : (c.p11,c.p10,c.p01,c.p00,c.pNone),
+
+                          # Common homs. Mean of everything.
+                          (c.h00, c.h00) : ( (c.p00,c.p01,c.p10,c.p11),
+                                             (c.p00,c.p01,c.p10,c.p11),
+                                             (c.p00,c.p01,c.p10,c.p11),
+                                             (c.p00,c.p01,c.p10,c.p11),
+                                             c.pNone),
+                          (c.h11, c.h11) : ( (c.p00,c.p01,c.p10,c.p11),
+                                             (c.p00,c.p01,c.p10,c.p11),
+                                             (c.p00,c.p01,c.p10,c.p11),
+                                             (c.p00,c.p01,c.p10,c.p11),
+                                             c.pNone),                          
+
+                          # One het. Few alternatives
+                          (c.h10, c.h00) : ((c.p00,c.p01),  # mean of these
+                                            (c.p00,c.p01),
+                                            (c.p10,c.p11),
+                                            (c.p10,c.p11),
+                                            c.pNone),
+                          
+                          
+                          (c.h10, c.h11) : ((c.p00,c.p01),
+                                            (c.p00,c.p01),
+                                            (c.p10,c.p11),
+                                            (c.p10,c.p11),
+                                            c.pNone),
+                          (c.h01, c.h11) : ( (c.p10,c.p11),
+                                             (c.p10,c.p11),
+                                             (c.p00,c.p01),
+                                             (c.p00,c.p01),
+                                             c.pNone),
+                          (c.h00, c.h10) : ( (c.p00,c.p10),
+                                             (c.p01,c.p11),
+                                             (c.p00,c.p10),
+                                             (c.p01,c.p11),
+                                             c.pNone),
+                          (c.h01, c.h00) : ( (c.p10,c.p11),
+                                             (c.p10,c.p11),
+                                             (c.p00,c.p01),
+                                             (c.p00,c.p01),
+                                             c.pNone), 
+                          (c.h00, c.h01) : ( (c.p01,c.p11),
+                                             (c.p00,c.p10),
+                                             (c.p01,c.p11),
+                                             (c.p00,c.p10),
+                                             c.pNone),
+                          (c.h11, c.h10) : ( (c.p00,c.p10),
+                                             (c.p01,c.p11),
+                                             (c.p00,c.p10),
+                                             (c.p01,c.p11),
+                                             c.pNone),
+                          (c.h11, c.h01) : ( (c.p01,c.p11),
+                                             (c.p00,c.p10),
+                                             (c.p01,c.p11),
+                                             (c.p00,c.p10),
+                                             c.pNone),
+                          }
+         assert len(phaseMap2IBD) == 4*4
+         old_phase = phaseMap2IBD[(old_h0,old_h1)][new_phase]
+         
+      else:
+         # hom/hom genotypes => just transmit phase information forward.
+         #                              ibd11, ibd10, ibd01, ibd00, ibdNone
+         phaseMap = { (c.h10, c.h10) : (c.p00, c.p01, c.p10, c.p11, c.pNone),
+                      (c.h10, c.h01) : (c.p01, c.p00, c.p11, c.p10, c.pNone),
+
+                      (c.h10, c.h00) : (c.p00, c.p01, c.p10, c.p11, c.pNone),
+                      (c.h10, c.h11) : (c.p00, c.p01, c.p10, c.p11, c.pNone),
+
+                      (c.h01, c.h10) : (c.p10, c.p11, c.p00, c.p01, c.pNone),
+                      (c.h01, c.h01) : (c.p11, c.p10, c.p01, c.p00, c.pNone),
+                      
+
+                      (c.h01, c.h00) : (c.p10, c.p11, c.p00, c.p01, c.pNone),
+                      (c.h01, c.h11) : (c.p10, c.p11, c.p00, c.p01, c.pNone),
+                      
+                      (c.h00, c.h10) : (c.p00, c.p01, c.p10, c.p11, c.pNone),
+                      (c.h00, c.h01) : (c.p01, c.p00, c.p11, c.p10, c.pNone),
+
+                      (c.h11, c.h10) : (c.p00, c.p01, c.p10, c.p11, c.pNone),
+                      (c.h11, c.h01) : (c.p01, c.p00, c.p11, c.p10, c.pNone),
+                      
+                      (c.h11, c.h00) : (c.p00, c.p01, c.p10, c.p11, c.pNone),
+                      (c.h00, c.h11) : (c.p00, c.p01, c.p10, c.p11, c.pNone),
+
+                      (c.h00, c.h00) : (c.p00, c.p01, c.p10, c.p11, c.pNone),
+                      (c.h11, c.h11) : (c.p00, c.p01, c.p10, c.p11, c.pNone),
+                      }
+         assert len(phaseMap) == 4*4
+         old_phase = phaseMap[(old_h0,old_h1)][new_phase]
+
+
+
+      return (Ellipsis,old_prevPhase,old_phase,old_h0,old_h1)
 
       
 
@@ -1345,6 +1543,8 @@ class longRangePhase:
       else:
          # Should do something intelligent, e.g. warn that couldn't find any IBD segments.
          pass
+      if len(self.ibd_regions.shape) == 0:
+         self.ibd_regions.shape = (1,)
       
    def ibdCoverCounts(self,scoreLimit = 0.0 ):
       "Calculate the coverage of the called IBD relations for each site x haplotype"
@@ -1394,7 +1594,7 @@ class longRangePhase:
          self.geno = numpy.ascontiguousarray(self.geno, dtype=numpy.int8)
 
 
-   def computeLogLikeTable(self):
+   def computeLogLikeTable_notForSwitchesAsOf31March2011(self):
       """Compute the log likelihood table to be used in preprocessing"""
       # LLtable[marker,genotype1, genotype2]
       # genotypes hom 0, hom 1, het 2
@@ -1430,7 +1630,9 @@ class longRangePhase:
       
       self.LLtable = numpy.cast[self.dataType](self.LLtable)
 
-   def computeLogLikeTable_directLogLike(self):
+
+   #def computeLogLikeTable_directLogLike(self):
+   def computeLogLikeTable(self):
       """Compute the log likelihood table to be used in preprocessing"""
       # LLtable[marker,genotype1, genotype2]
       # genotypes hom 0, hom 1, het 2
@@ -2262,6 +2464,8 @@ class longRangePhase:
       repeatCount=it.count(0)
       repeat=repeatCount.next()
 
+
+      
       while  repeat<iterations:
          start_repeat_time=time.time()
          printerr("Repeat %d"%(repeat))
@@ -2293,6 +2497,7 @@ class longRangePhase:
 
          printerr("Mean squared error for %dth repeat: %g (improvement %g,  %g%%)"%(repeat,totMeanSqrE, errImpro, improProp ))
          prevMeanSqrE = totMeanSqrE
+            
 
 
 
@@ -2532,6 +2737,11 @@ class longRangePhase:
       # 2 = 01
       # 3 = 11
       hLike = self.hLike
+      posCalls = hLike.argmin(axis=2)
+      #pdb.set_trace()
+
+
+      switchHetSites = (posCalls == 2)
       if not allow_inferred_genotypes:  # Only allow phase calls that are consistent with observed genotypes
          self.computeGenos()
          hLike = hLike.view(numpy.ma.MaskedArray)
@@ -2543,7 +2753,15 @@ class longRangePhase:
 
          
       posCalls = hLike.argmin(axis=2)
+      #pdb.set_trace()
 
+
+
+      #switchHetSites = (posCalls == 2)
+      hetPhases = numpy.cumsum(switchHetSites,axis=1)%2
+      hets = numpy.logical_or(posCalls==1,posCalls==2)
+      posCalls[hets] = 1+hetPhases[hets]
+      
 
 
 
@@ -2551,10 +2769,9 @@ class longRangePhase:
       #fadA.shape = (self.markers,-1,2)  # = (markers,indivs,2)
 
 
-
+      
       phases = numpy.array(idx2phase[posCalls]).transpose((1,0,2))
       phases.shape = (self.markers, -1, 2) # = (markers,indivs,2)
-
 
       if self.callThreshold > 1.0:
          phases = self.thresholdCalls(phases)
@@ -2870,7 +3087,7 @@ class longRangePhase:
       startTime=newTime
 
       self.computeGenos()
-      self.computeLogLikeTable()
+      #self.computeLogLikeTable()
       
       if self.poolSize <= 1:
          ibdRegions=self.__computeOneIBDnoUpdate( allPairs )
@@ -2919,7 +3136,7 @@ class longRangePhase:
       startTime=newTime
       
       self.computeGenos()
-      self.computeLogLikeTable()
+      #self.computeLogLikeTable()
       
       assert self.geno.flags.c_contiguous, "Genotype array must be C-contiguous"
       assert self.geno.strides[1] == 1, "Geno array must be indexable by first coordinate."
@@ -2935,6 +3152,7 @@ class longRangePhase:
 
       assert peakThreshold > 0
       assert dipThreshold > 0
+
       if self.poolSize <= 1:
          ibdRegions=self.c_ext.LLscan_and_filter(0,self.indivs,self.geno,self.LLtable,peakThreshold,dipThreshold,min_cover,min_ibd_length )
       else:
@@ -2949,8 +3167,7 @@ class longRangePhase:
          ibdRegions = numpy.concatenate(ibdRegions)
          ibdRegions = tools.uniqueRows(ibdRegions)
          newTime = time.time()
-
-
+      assert (ibdRegions[:,0] < ibdRegions[:,1]).all()
       #ibdRegions=ibdRegions[(ibdRegions[:,0]==4)]
       #&(ibdRegions[:,2]<=3896)&(ibdRegions[:,3]>=4015)]
       #ibdRegions[:,0]=ibdRegions[:,1]

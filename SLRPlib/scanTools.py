@@ -151,8 +151,8 @@ for(int i1=from_indiv; i1 < to_indiv ; i1++) {
     
     if(max_value > lowLimit  && (peak_idx-low_idx) >= min_length ) {  // Gone past a high peak
          ibd_region_type high_reg;
-         high_reg.i1 = i1*2;
-         high_reg.i2 = i2*2;
+         high_reg.i1 = std::min(i1,i2)*2;
+         high_reg.i2 = std::max(i1,i2)*2;
          high_reg.bPos = low_idx;
          high_reg.ePos = peak_idx;
          high_reg.score=(int)max_value;
@@ -869,6 +869,15 @@ def add_processAllocedIBD(mod):
         const int ind1 = IND1FIRSTHAPLO1(ibd_idx)/2;
         const int ind2 = IND2FIRSTHAPLO1(ibd_idx)/2;
 
+
+        /*
+        if( PREVMEANSQRDIFF3(ibd_idx,0,0) < 2.3e-16 * 2.3e-16 ) {
+            tot_sum_sq_err += PREVMEANSQRDIFF3(ibd_idx,0,0);
+            PREVMEANSQRDIFF3(ibd_idx,0,0) *= 2;
+            std::cout<<"Skipping "<<ibd_idx<<std::endl;
+            continue;
+        }
+        */
         // Trickery needed to send array of objects to ext_tools
         PyArrayObject* p2h1_array_ind = (PyArrayObject*)P2H11(ibd_idx);
         PyArrayObject* p2h2_array_ind = (PyArrayObject*)P2H21(ibd_idx);
@@ -887,9 +896,10 @@ def add_processAllocedIBD(mod):
 
         for(int p=0;p<5;p++) {
             if(beginM == 0 ) {
-                p2p[0][p] = 0.0;
+                p2p[0][p] = (%(cType)s)FIRSTCP2P1(p);
+                //p2p[0][p] = 0.0;
             } else {
-                if(p == 4) {
+                if(p == 4) { // Due to overhang, we always start from non ibd state
                    p2p[0][p] = 0.0;
                 } else {
                    p2p[0][p] = -log(0.0);
@@ -935,9 +945,12 @@ def add_processAllocedIBD(mod):
                     tot_min_p2p = std::min(tot_min_p2p,min_p2p);
                  }
                  // Normalize
-                 for(int p=0;p<5;p++) {
+                  //std::cout<<"p2p["<<ij+1<< "]={";
+                 for(int p=0;p<5;p++) { 
                     p2p[ij+1][p] -= tot_min_p2p;
+                    //std::cout<<p2p[ij+1][p]<<",";
                  }
+                 //std::cout<<"}"<<std::endl;
 
                  //std::cout<<ij<<": tot_min_p2p="<< tot_min_p2p<<std::endl;
             }
@@ -949,10 +962,11 @@ def add_processAllocedIBD(mod):
             for(int p=0;p<5;p++) { //Initialization
                if(endM == (num_markers - 1) ) { // No information past the end of chromosome
                   //ca2pP(p,endM-beginM+1)=(%(cType)s)firstCP2P(p); // THIS IS UNDER TESTING #  Fri Sep 03 16:35:32 BST 2010 
-                  p2pP[endM-beginM+1][p]=0.0;
+                  //p2pP[endM-beginM+1][p]=0.0;
+                  p2pP[endM-beginM+1][p]=(%(cType)s)FIRSTCP2P1(p);
                   //std::cerr<<"End of chromosome@"<<endM<<": ca2pP <- " << ca2pP(p,endM-beginM+1) <<std::endl;
-               } else { // Within the chromosome, IBD region ends in non IBD state
-                  if(p == 4) {
+               } else { // Within the chromosome, IBD region ends in non IBD state (due to overhang)
+                  if(p == 4) {  
                      p2pP[endM-beginM+1][p] = 0.0;
                   } else {
                      p2pP[endM-beginM+1][p] = (%(cType)s)-log(0.0);
@@ -1025,6 +1039,8 @@ def add_processAllocedIBD(mod):
 
 
             }
+
+            PREVMEANSQRDIFF3(ibd_idx,0,0) = sum_sq_err / ( endM - beginM + 1) ;
             tot_sum_sq_err += sum_sq_err / ( endM - beginM + 1) ;
             //tot_markers_err += 
 
@@ -1315,6 +1331,7 @@ def add_processAllocedIBD_sumProduct(mod):
     }
 
 
+
     Py_END_ALLOW_THREADS;
     assert(!isnan(tot_sum_sq_err));
     assert(!isnan(tot_markers_err));
@@ -1352,8 +1369,6 @@ def add_processAllocedIBD_sumProduct(mod):
         p2h2 =  allocedIBD["p2h2"]
         prevMeanSqrDiff =  allocedIBD["prevMeanSqrDiff"]
 
-
-
         # hLike.shape = (individuals, markers, 4)
         hLike = numpy.zeros((1,2,4),dtype=dataType)
         func = ext_tools.ext_function('_processAllocedIBD_sumProduct_%s'%(cDataType),
@@ -1387,9 +1402,9 @@ def build_c_scan_ext():
     add_processAllocedIBD_sumProduct(mod)
 
     #pdb.set_trace()
-    mod.customize.add_extra_compile_arg("-g")
+    #mod.customize.add_extra_compile_arg("-g")
     mod.customize.add_extra_compile_arg("-Wall")
-    #mod.customize.add_extra_compile_arg("-O3")
+    mod.customize.add_extra_compile_arg("-O3")
     #mod.customize.add_extra_compile_arg("-ftree-vectorizer-verbose=3")
     mod.customize.add_extra_compile_arg("-DNIBDFILTERDEBUG")
     mod.customize.add_extra_compile_arg("-DNDEBUG")
@@ -1443,6 +1458,8 @@ class c_ext:
         p2h2 =  allocedIBD["p2h2"]
         prevMeanSqrDiff =  allocedIBD["prevMeanSqrDiff"]
 
+        import pdb
+        #pdb.set_trace()
         #assert CPT.flags.c_contiguous, "CPT must be c-contiguous"
         assert hLike.flags.c_contiguous, "CPT must be c-contiguous"
         if MAPestimate:

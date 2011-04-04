@@ -373,9 +373,10 @@ def main():
                return False
          else:
             trimLength = max(options.minIBDlength*2,0)
-            printerr("Breaking phase symmetries with the het after %dth SNP!"%(trimLength))
-            printerr("Broke phase symmetry for %d individuals"%(rlp.breakPhaseSymmetry(trimLength)))
-
+            trimLength = 0
+            #printerr("Breaking phase symmetries with the het after %dth SNP!"%(trimLength))
+            #printerr("Broke phase symmetry for %d individuals"%(rlp.breakPhaseSymmetry(trimLength)))
+            pass
 
 
 
