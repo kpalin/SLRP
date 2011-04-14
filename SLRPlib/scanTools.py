@@ -834,9 +834,9 @@ def add_processAllocedIBD(mod):
 
     code="#line %d \"scanTools.py\""%(tools.lineno()+1) + """
 
-#ifndef NDEBUG
+//#ifndef NDEBUG
     std::cout<<"function: "<<__func__<<std::endl;
-#endif
+//#endif
 
     int ij,j;
     int h0,h1,p,p1;
@@ -853,13 +853,19 @@ def add_processAllocedIBD(mod):
     // Trickery needed to send array of objects to ext_tools
 #undef P2H12
 #undef P2H22
-    conversion_numpy_check_type( (PyArrayObject*)P2H11(0) ,%(pyCtype)s, "p2h1");
-    conversion_numpy_check_type( (PyArrayObject*)P2H11(ibd_chunks-1) ,%(pyCtype)s, "p2h1");
-    conversion_numpy_check_type( (PyArrayObject*)P2H21(0) ,%(pyCtype)s, "p2h2");
-    conversion_numpy_check_type( (PyArrayObject*)P2H21(ibd_chunks-1) ,%(pyCtype)s, "p2h2");
+    //PyArrayObject *p2h1_array_idx = convert_to_numpy((PyObject*)P2H11(0), "p2h1(0)");
+    //conversion_numpy_check_type( p2h1_array_idx ,%(pyCtype)s, "p2h1(0)");
+    //p2h1_array_idx = convert_to_numpy((PyObject*)P2H11(ibd_chunks-1), "p2h1(ibd_chunks-1)");
+
+    //conversion_numpy_check_type( p2h1_array_idx ,%(pyCtype)s, "p2h1(ibd_chunks-1)");
+    
+    //conversion_numpy_check_type( (PyArrayObject*)P2H11(ibd_chunks-1) ,%(pyCtype)s, "p2h1");
+    //conversion_numpy_check_type( (PyArrayObject*)P2H21(0) ,%(pyCtype)s, "p2h2");
+    //conversion_numpy_check_type( (PyArrayObject*)P2H21(ibd_chunks-1) ,%(pyCtype)s, "p2h2");
 
 #undef CPT
 #define CPT(marker,pPrev,pNext,h0,h1) (*((%(cType)s*)(CPT_array->data + (marker)*SCPT[0] + (pPrev)*SCPT[1] + (pNext)*SCPT[2] + (h0)*SCPT[3] + (h1)*SCPT[4]   )))
+    PyThreadState *_save;
 
     Py_BEGIN_ALLOW_THREADS;
 
@@ -870,14 +876,15 @@ def add_processAllocedIBD(mod):
         const int ind2 = IND2FIRSTHAPLO1(ibd_idx)/2;
 
 
-        /*
-        if( PREVMEANSQRDIFF3(ibd_idx,0,0) < 2.3e-16 * 2.3e-16 ) {
+
+        
+        if( 0 && PREVMEANSQRDIFF3(ibd_idx,0,0) < 2.3e-16 ) {
             tot_sum_sq_err += PREVMEANSQRDIFF3(ibd_idx,0,0);
             PREVMEANSQRDIFF3(ibd_idx,0,0) *= 2;
             std::cout<<"Skipping "<<ibd_idx<<std::endl;
             continue;
         }
-        */
+        
         // Trickery needed to send array of objects to ext_tools
         PyArrayObject* p2h1_array_ind = (PyArrayObject*)P2H11(ibd_idx);
         PyArrayObject* p2h2_array_ind = (PyArrayObject*)P2H21(ibd_idx);
@@ -885,8 +892,17 @@ def add_processAllocedIBD(mod):
 #define P2H1(i,j)  (*((%(cType)s*)(p2h1_array_ind->data + (i)*p2h1_array_ind->strides[0] + (j)*p2h1_array_ind->strides[1])))
 #define P2H2(i,j)  (*((%(cType)s*)(p2h2_array_ind->data + (i)*p2h2_array_ind->strides[0] + (j)*p2h2_array_ind->strides[1])))
 #ifndef NDEBUG
-       conversion_numpy_check_type( p2h1_array_ind ,%(pyCtype)s, "p2h1_array_ind"); 
-       conversion_numpy_check_type( p2h2_array_ind ,%(pyCtype)s, "p2h2_array_ind"); 
+        //PY_END_ALLOW_THREADS;
+        if(!PyArray_Check((PyObject*)p2h1_array_ind)) {
+           handle_bad_type((PyObject*)p2h1_array_ind,"numpy","P2H1(ibd_idx)");
+        }
+        conversion_numpy_check_type( p2h1_array_ind ,%(pyCtype)s, "p2h1_array_ind"); 
+
+        if(!PyArray_Check((PyObject*)p2h2_array_ind)) {
+           handle_bad_type((PyObject*)p2h2_array_ind,"numpy","P2H2(ibd_idx)");
+        }
+        conversion_numpy_check_type( p2h2_array_ind ,%(pyCtype)s, "p2h2_array_ind"); 
+        //PY_BEGIN_ALLOW_THREADS;
 #endif
         sum_sq_err = 0.0;
         
@@ -1126,10 +1142,10 @@ def add_processAllocedIBD_sumProduct(mod):
     // Trickery needed to send array of objects to ext_tools
 #undef P2H12
 #undef P2H22
-    conversion_numpy_check_type( (PyArrayObject*)P2H11(0) ,%(pyCtype)s, "p2h1");
-    conversion_numpy_check_type( (PyArrayObject*)P2H11(ibd_chunks-1) ,%(pyCtype)s, "p2h1");
-    conversion_numpy_check_type( (PyArrayObject*)P2H21(0) ,%(pyCtype)s, "p2h2");
-    conversion_numpy_check_type( (PyArrayObject*)P2H21(ibd_chunks-1) ,%(pyCtype)s, "p2h2");
+    //conversion_numpy_check_type( (PyArrayObject*)P2H11(0) ,%(pyCtype)s, "p2h1");
+    //conversion_numpy_check_type( (PyArrayObject*)P2H11(ibd_chunks-1) ,%(pyCtype)s, "p2h1");
+    //conversion_numpy_check_type( (PyArrayObject*)P2H21(0) ,%(pyCtype)s, "p2h2");
+    //conversion_numpy_check_type( (PyArrayObject*)P2H21(ibd_chunks-1) ,%(pyCtype)s, "p2h2");
 
     typedef %(cType)s (*CPT_ptr_t)[5][5][4][4];
     typedef %(cType)s (*hLike_ptr_t)[4];
@@ -1297,7 +1313,7 @@ def add_processAllocedIBD_sumProduct(mod):
 
                     P2H1(ij,h0) = dampF * P2H1(ij,h0) + (1-dampF)*tmp_p2h1[h0];
                     P2H2(ij,h0) = dampF * P2H2(ij,h0) + (1-dampF)*tmp_p2h2[h0];
-
+ 
 
                     sumVal  += P2H1(ij,h0);
                     sumVal2 += P2H2(ij,h0);
@@ -1402,9 +1418,9 @@ def build_c_scan_ext():
     add_processAllocedIBD_sumProduct(mod)
 
     #pdb.set_trace()
-    #mod.customize.add_extra_compile_arg("-g")
+    mod.customize.add_extra_compile_arg("-g")
     mod.customize.add_extra_compile_arg("-Wall")
-    mod.customize.add_extra_compile_arg("-O3")
+    #mod.customize.add_extra_compile_arg("-O3")
     #mod.customize.add_extra_compile_arg("-ftree-vectorizer-verbose=3")
     mod.customize.add_extra_compile_arg("-DNIBDFILTERDEBUG")
     mod.customize.add_extra_compile_arg("-DNDEBUG")
@@ -1450,6 +1466,8 @@ class c_ext:
         return c_scan_ext.IBD_filter_c(ibd_regions,ibd_limit,individuals)
 
     def processAllocedIBD(self,allocedIBD,hLike,CPT,dampF,firstCP2P,MAPestimate=True):
+        assert len(allocedIBD) > 0, "Must have something to process"
+
         ind1 = allocedIBD["ind1firstHaplo"]
         ind2 = allocedIBD["ind2firstHaplo"]
         beginMarker =  allocedIBD["beginMarker"]

@@ -1271,7 +1271,7 @@ class longRangePhase:
 
       pCPT = numpy.exp(-self.CPT)
       assert numpy.allclose(pCPT.sum(axis=2),1.0)
-
+      pdb.set_trace()
 
                                   
       assert numpy.allclose(pCPT[:,c.noIBD,c.ibd00,c.hHom0,c.hHom0],
@@ -1397,6 +1397,7 @@ class longRangePhase:
                                              c.pNone),
                           }
          assert len(phaseMap2IBD) == 4*4
+#         assert all(map(lambda x:len(set(x)) == 5,phaseMap2IBD.values()))
          old_phase = phaseMap2IBD[(old_h0,old_h1)][new_phase]
          
       else:
@@ -1428,6 +1429,7 @@ class longRangePhase:
                       (c.h11, c.h11) : (c.p00, c.p01, c.p10, c.p11, c.pNone),
                       }
          assert len(phaseMap) == 4*4
+         assert all(map(lambda x:len(set(x)) == 5,phaseMap.values()))
          old_phase = phaseMap[(old_h0,old_h1)][new_phase]
 
 
@@ -3237,7 +3239,7 @@ class longRangePhase:
 
 
          toAllocIBD = (self.ibd_regions[x] for x in toAllocIBDindicator.nonzero()[0])
-         overhang = 10
+         overhang = 0
          newIBD = numpy.array( [(int(x["ind1"] - x["ind1"] % 2),
                                     int(x["ind2"] - x["ind2"] % 2), 
                                     int(max(0, int(x["beginM"]) - overhang)),
@@ -3267,11 +3269,17 @@ class longRangePhase:
          printerr("Allocated %gGB for %d IBD regions overlapping markers %d - %d"%( sum(x[4].nbytes+x[5].nbytes+x[6].nbytes for x in allocedIBD) * 1.0 / 2.0**30,
                                                                                     len(allocedIBD), firstBase, min(self.markers, lastBase) ))
 
-         if self.poolSize <= 1:
+         if self.poolSize <=1 or len(allocedIBD) < 2*self.poolSize:
+            if self.poolSize > 1:
+               self.set_workers(1)
+            #self.iterateOverIBD(allocedIBD[(i*chunkSize):((i+1)*chunkSize)],iterations,intermedFAD=intFADbase,intermedIBD=intIBDbase,use_max_product=use_max_product)
+            #print "allocedIBD len:",len(allocedIBD)
             self.iterateOverIBD(allocedIBD,iterations,intermedFAD=intFADbase,intermedIBD=intIBDbase,use_max_product=use_max_product)
          else:
             # Threading
-            chunkSize = int( len(allocedIBD) * 1.0 / self.poolSize + 1) 
+            chunkSize = int( len(allocedIBD) * 1.0 / self.poolSize + 1)
+            #print "Chunk size:",chunkSize
+            #print "allocedIBD len:",len(allocedIBD)
             handythread.foreach(lambda chunk: self.iterateOverIBD(chunk, iterations, intermedFAD=intFADbase,intermedIBD=intIBDbase),
                                 [allocedIBD[(i*chunkSize):((i+1)*chunkSize)] for i in range(self.poolSize) ], threads = self.poolSize )
          ibd_segment_cache.update(self.ibdSegments)
