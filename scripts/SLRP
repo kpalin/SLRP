@@ -123,7 +123,7 @@ def process_args():
                      metavar="NUM",default=10 )
 
    parser.add_option("", "--IBDcoverLimit", dest="ibdCoverLimit",type="int",
-                     help="Soft lower limit for number of IBD sharing. Only do message passing on the longest NUM segments covering a locus. The selection is greedy, hence there might be more than minimum number of segments used. Non positive limits turn off this limit. [default: %default]", metavar="NUM",default=5 )
+                     help="Soft lower limit for number of IBD sharing. Only do message passing on the longest NUM segments covering a locus. The selection is greedy, hence there might be more than minimum number of segments used. Non positive value turn off this limit. [default: %default]", metavar="NUM",default=-1 )
 
 
    parser.add_option("", "--use_sum_product", dest="use_max_product",action="store_false",
@@ -157,8 +157,8 @@ def process_args():
                      help="Minimum score above which to use the IBD matches loaded from a file [default:%default]", metavar="NUM",default=0.0)
 
 
-   parser.add_option("-F", "--full", dest="fullIBD",action="store_true",
-                     help="Run the full all-pairs analysis (warning: not tested and needs huge memory)  [default:%default]",
+   parser.add_option("-F", "--fastPreProc", dest="fastPreProc",action="store_true",
+                     help="Do pre-processing (putative IBD segment finding) with fast sweepline method, which disregards prior phase information and IBD-noIBD transition probabilities  [default:%default]",
                      default=False
                      )
 
@@ -391,7 +391,11 @@ def main():
             printerr("Filtering IBD segments to coverage of about %d"%(options.ibdCoverLimit))
             cover = None
             if not rlp.haveIBD():
-               rlp.phasePreProc(options.ibdSegmentCalls,options.ibdCoverLimit if options.ibdCoverLimit>0 else 99999, options.minIBDlength)
+               if options.fastPreProc:
+                  rlp.phasePreProc(options.ibdSegmentCalls,options.ibdCoverLimit if options.ibdCoverLimit>0 else 99999, options.minIBDlength)
+               else:
+                  rlp.phasePreProcHighMem(options.ibdSegmentCalls,options.ibdCoverLimit if options.ibdCoverLimit>0 else 99999, options.minIBDlength)
+                  
             if False and options.ibdCoverLimit > 0:
                addC,skipC,cover = rlp.filterIBDcover( options.ibdCoverLimit, options.minIBDlength)
                printerr("Skipped %d/%d = %g%% putative IBD segments"%(skipC,addC+skipC, skipC*100.0/(addC+skipC)))

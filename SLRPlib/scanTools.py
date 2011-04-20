@@ -151,8 +151,8 @@ for(int i1=from_indiv; i1 < to_indiv ; i1++) {
     
     if(max_value > lowLimit  && (peak_idx-low_idx) >= min_length ) {  // Gone past a high peak
          ibd_region_type high_reg;
-         high_reg.i1 = i1*2;
-         high_reg.i2 = i2*2;
+         high_reg.i1 = std::min(i1,i2)*2;
+         high_reg.i2 = std::max(i1,i2)*2;
          high_reg.bPos = low_idx;
          high_reg.ePos = peak_idx;
          high_reg.score=(int)max_value;
@@ -829,6 +829,207 @@ return_val = out;
 
 
 
+
+def add_scan_IBD_hmm(mod):
+    """Add the "old fashioned" HMM scan for the preprocessing"""
+
+
+
+    # Get rid of bliz converters. They take 67% of runtime.
+    codeNormBT="#line %d \"scanTools.py\""%(tools.lineno()+1) +"""
+#undef CPT
+            clock_t startC=clock(),curC;
+            time_t startT = time(NULL), curT;
+            unsigned int totalCalledMarkers = 0;
+            int ij,j;
+            int h0,h1,p;
+            %(cType)s min_ca2p,tot_min_ca2p;
+            int total_pairs = indPairs.len();
+            int ind1,ind2;
+            int firstP;
+            
+            double min_val,max_val;
+            const unsigned int REPORT_FREQ = std::max(1000, total_pairs / 200 );
+
+            // These are custom macros resembling Py_(BEGIN|END)_ALLOW_THREADS  but do not require block consistency
+            PyThreadState *_save;
+#define PY_BEGIN_ALLOW_THREADS   _save = PyEval_SaveThread();
+#define PY_END_ALLOW_THREADS     PyEval_RestoreThread(_save); 
+
+            
+            for(int iPair=0; iPair < total_pairs ; iPair++) {
+               // This should be made with iterators.
+               ind1=indPairs[iPair][0];
+               ind2=indPairs[iPair][1];
+
+               PY_BEGIN_ALLOW_THREADS;
+
+               ind1/=2;
+               ind2/=2;
+
+               if( (iPair+1) %% REPORT_FREQ == 0 ) {
+                   curC=clock();
+                   curT = time(NULL); 
+                   double sElapsed = (curC-startC)/CLOCKS_PER_SEC;
+                   double percDone = iPair*100.0 / total_pairs;
+                   double sExpect = sElapsed*100.0/percDone;
+                   std::cerr << "Doing " << ind1 << " " << ind2 << " (" << iPair << "/" << indPairs.len() << " = "
+                             << percDone <<"%% done. Expecting "<< sExpect/60.0 << " CPU mins. Used " << (curT - startT)/60.0
+                             << " wall clock mins. Expected memory usage " << ((totalCalledMarkers * 2.0 * 4.0 * sizeof(%(cType)s)) * (100.0/percDone)) / ((double)(((long)2)<<30))
+                             << "GB ) Estimated diploid kinship: " << totalCalledMarkers *1.0 / (endM * 1.0 * iPair + 1e-3) << std::endl;
+                   }
+               // Forward  // TODO: Get rid of endM i.e. find it out in C side.
+
+            // First step
+            for(p=0;p<5;p++) {
+               //ca2p(p,0) = firstCP2P(p); //0.0;
+               ca2p(p,0) = 0.0;
+
+               bt(p,0) = -1;
+
+            }
+
+
+               for(ij=0,j=0;j<=endM;j++,ij++) {
+                 tot_min_ca2p = 1e308;
+
+                 // ca_j -> p_j
+                 // TODO: Don't minimize exhaustively, but try to be smart with structure of CPT etc.
+                 for(p=0;p<5;p++) {
+                    ca2p(p,ij+1) = 1e307;
+                    min_ca2p = 1e308;
+                    
+                    for(int p0=0; p0<5; p0++) {
+                       for(h0=0;h0<4;h0++) {
+                         for(h1=0;h1<4;h1++) {
+                            ca2p(p,ij+1) = std::min(ca2p(p,ij+1), CPT(j, p0 ,p,h0,h1) + hLike(ind1,j,h0) + hLike(ind2,j,h1) + ca2p(p0, ij) );
+                         }
+                       }
+                       if(min_ca2p > ca2p(p,ij+1) ) {
+                       
+                          if( p!= 4 || p0 != 4 || min_ca2p - ca2p(p,ij + 1) > 1.38) {  // If prob 4 is < 0.5
+                              bt(p,j+1)=p0;
+                              min_ca2p = ca2p(p,ij+1);
+                          }
+                       }
+
+                    }
+                    tot_min_ca2p = std::min(tot_min_ca2p,min_ca2p);
+                 }                 
+                 tot_min_ca2p = std::min(tot_min_ca2p, ca2p(4,ij+1));
+                 // Normalize
+                 for(p=0;p<5;p++) {
+                    ca2p(p,ij+1) -= tot_min_ca2p;
+                 }
+              }
+
+              double c_ca2p[5];
+              for(int p=0;p<5;p++)
+                  c_ca2p[p] = ca2p(p,ij+1);
+// redo here.
+
+              for(int p=0;p<5;p++)
+                  assert(c_ca2p[p] == ca2p(p,ij+1));
+                  
+
+
+
+               firstP=4;
+
+               min_val=1e308,max_val=0.0;
+
+               for(int p=4;p>=0; p--) {
+                   double val = ca2p(p,endM+1) ;//+ firstCP2P(p);
+                   //printf("%%g, ",val);
+                   if(val < min_val) {
+                       min_val = val;
+                       firstP = p;
+                   }
+                   if( val > max_val) {
+                       max_val=val;
+                   }
+               }
+
+               if(max_val<1e-15) {
+                   firstP=4;
+               }
+
+               //std::cout<<"  => "<<firstP<<std::endl;
+
+
+               int endMark = endM;
+
+
+               int curState;
+               int i = endM;
+               //int *h1map = {0, 1, 0, 1};
+               //int *h2map = {0, 0, 1, 1};
+
+
+               //for(int p = bt(4,endM); p >= 0; ) {
+               for(int p = firstP; i>0 && p >= 0; ) {
+                   curState = p;
+                   endMark = i;
+                   
+                   while( curState == p ) {
+                       p = bt(p,i);
+                       i--;
+                   }
+                   if( curState < 4 ) {
+                       PY_END_ALLOW_THREADS;
+                       py::tuple new_IBD(4);
+                       new_IBD[0] = ind1 * 2;
+                       new_IBD[1] = ind2 * 2;
+                       new_IBD[2] = i + 1;
+                       new_IBD[3] = endMark;
+                       ibdRegions.append(new_IBD);
+                       totalCalledMarkers += endMark - i;
+                       PY_BEGIN_ALLOW_THREADS
+                   }
+                   
+
+               }
+               
+               PY_END_ALLOW_THREADS;
+
+            }
+            """
+            
+    import pdb
+    #pdb.set_trace()
+    ibdRegions=[]
+   
+    endM = 0
+
+    indPairs=[]
+
+    for cDataType,pyCtype,dataType in (("double","PyArray_DOUBLE",numpy.float64),("float","PyArray_FLOAT",numpy.float32)):
+       allocedIBD_dtype = { 'names' : ( "ind1firstHaplo", "ind2firstHaplo",  "beginMarker",  "lastMarkerFilled", "p2h1", "p2h2",  "prevMeanSqrDiff", "endMarker"),
+                            'formats' : (numpy.int32,     numpy.int32,       numpy.int32,    numpy.int32,   numpy.object, numpy.object, (numpy.float64,(1,1)), numpy.int32) }
+       
+       #allocedIBD_dtype = { 'names' : ( "ind1firstHaplo", "ind2firstHaplo",  "beginMarker",  "lastMarkerFilled", "p2h1", "p2h2",  "prevMeanSqrDiff", "endMarker"),
+       #                     'formats' : (numpy.int32,     numpy.int32,       numpy.int32,    numpy.int32,   (dataType,(5,4)), (dataType,(5,4)), (numpy.float64,(1,1)), numpy.int32) }
+       allocedIBD=numpy.empty(2,dtype = allocedIBD_dtype)
+
+       dampF = 0.0
+       firstCP2P = numpy.empty(5, dtype = dataType)
+       CPT = numpy.empty((6,5,5,4,4), dtype= dataType)
+       ca2p = numpy.empty((5,1), dtype= dataType)
+       bt = numpy.empty((5,1), dtype = numpy.int)
+                
+
+
+       # hLike.shape = (individuals, markers, 4)
+       hLike = numpy.zeros((1,2,4),dtype=dataType)
+       func = ext_tools.ext_function('scan_IBD_hmm_%s'%(cDataType),
+                                     codeNormBT%{"cType":cDataType,"pyCtype":pyCtype},
+                                     ["bt",'firstCP2P',"hLike","indPairs","ca2p","endM","CPT","ibdRegions"],
+                                     type_converters = converters.blitz
+                                     )
+       mod.add_function(func)
+
+
+
 def add_processAllocedIBD(mod):
     """Add the function to do the phasing proper, without MPI"""
 
@@ -1366,12 +1567,11 @@ def add_processAllocedIBD_sumProduct(mod):
 
    
 
-def build_c_scan_ext():
+def define_c_scan_ext():
     """ Build the C extensions needed in longRangePhasing class.
         The extension will be built in the local directory.
     """
     import pdb
-    import os.path
     #print "My file name:",__file__
     mod = ext_tools.ext_module('c_scan_ext',compiler="gcc")
 
@@ -1385,7 +1585,8 @@ def build_c_scan_ext():
     add_ibd_region_filter(mod)
     add_processAllocedIBD(mod)
     add_processAllocedIBD_sumProduct(mod)
-
+    add_scan_IBD_hmm(mod)
+    
     #pdb.set_trace()
     mod.customize.add_extra_compile_arg("-g")
     mod.customize.add_extra_compile_arg("-Wall")
@@ -1393,6 +1594,15 @@ def build_c_scan_ext():
     #mod.customize.add_extra_compile_arg("-ftree-vectorizer-verbose=3")
     mod.customize.add_extra_compile_arg("-DNIBDFILTERDEBUG")
     mod.customize.add_extra_compile_arg("-DNDEBUG")
+    return mod
+
+    
+def build_c_scan_ext():
+    """ Build the C extensions needed in longRangePhasing class.
+        The extension will be built in the local directory.
+    """   
+    import os.path
+    mod = define_c_scan_ext()
     mod.compile(verbose=2,location = os.path.dirname(__file__))
 
 try:

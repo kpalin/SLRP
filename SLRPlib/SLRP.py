@@ -1269,7 +1269,8 @@ class longRangePhase:
          self.snpCMpos.extend( (cMposes[-1][1] + self.__mean_recomb_rate*(p-cMposes[-1][0]) for p in self.snpPos[len(self.snpCMpos):]) )
 
 
-
+      self.snpCMpos = numpy.array(self.snpCMpos)
+      self.snpPos = numpy.array(self.snpPos)
 
       printerr("Length of chromosome: %d bp, %g cM"%(self.snpPos[-1] - self.snpPos[0]+1,
                                                      self.snpCMpos[-1] - self.snpCMpos[0]))
@@ -1399,7 +1400,7 @@ class longRangePhase:
       # LLtable[marker,genotype1, genotype2]
       # genotypes hom 0, hom 1, het 2
 
-      printerr("Calculating log likelihoods from the IBD process. VERY PRELIMINARY. Doesn't work very well. ")
+      #printerr("Calculating log likelihoods from the IBD process. VERY PRELIMINARY. Doesn't work very well. ")
       # Non IBD likelihoods with complete data
       G00,Ghet,G11 = 0,2,1
 
@@ -1435,6 +1436,7 @@ class longRangePhase:
       # LLtable[marker,genotype1, genotype2]
       # genotypes hom 0, hom 1, het 2
 
+      raise "Don't come here"
       # Non IBD likelihoods with complete data
       G00,Ghet,G11 = 0,2,1
 
@@ -1483,7 +1485,7 @@ class longRangePhase:
       self.LLtable = numpy.cast[self.dataType](self.LLtable)
       
 
-   def __computeOneIBDnoUpdate(self,indPairs):
+   def computeOneIBDnoUpdate_LLscan(self,indPairs):
       """Calculate putative IBD segments with a log likelihood approach. The likelihoods are
       taken from the HMM transition/emission table and depend on the genetic distances
       between the markers."""
@@ -1519,7 +1521,7 @@ class longRangePhase:
       numpy.savetxt(freqFile,frq,fmt=["%d","%g"], delimiter="\t")
       pass
    
-   def __computeOneIBDnoUpdateOldie(self,indPairs):
+   def computeOneIBDnoUpdate(self,indPairs):
       "Compute one forward message passing over pair of individuals on restricted region. Dont update likelihoods."
       printerr('Running child process with id: ', os.getpid())
       #       cp2pN=self.cp2pN
@@ -1542,170 +1544,11 @@ class longRangePhase:
       
       #printerr("Running __computeOneIBDnoUpdate")
 
+      
       #TODO: Move more stuff to C
          
       ibdRegions=[]
 
-      # Get rid of bliz converters. They take 67% of runtime.
-      codeNormBT="#line %d \"SLRP.py\""%(tools.line()+1) +"""
-
-            clock_t startC=clock(),curC;
-            time_t startT = time(NULL), curT;
-            unsigned int totalCalledMarkers = 0;
-            int ij,j;
-            int h0,h1,p;
-            %(cType)s min_ca2p,tot_min_ca2p;
-            int total_pairs = indPairs.len();
-            int ind1,ind2;
-            int firstP;
-            
-            double min_val,max_val;
-            const unsigned int REPORT_FREQ = std::max(1000, total_pairs / 200 );
-
-            // These are custom macros resembling Py_(BEGIN|END)_ALLOW_THREADS  but do not require block consistency
-            PyThreadState *_save;
-#define PY_BEGIN_ALLOW_THREADS   _save = PyEval_SaveThread();
-#define PY_END_ALLOW_THREADS     PyEval_RestoreThread(_save); 
-
-            
-            for(int iPair=0; iPair < total_pairs ; iPair++) {
-               // This should be made with iterators.
-               ind1=indPairs[iPair][0];
-               ind2=indPairs[iPair][1];
-
-               PY_BEGIN_ALLOW_THREADS;
-
-               ind1/=2;
-               ind2/=2;
-
-               if( (iPair+1) %% REPORT_FREQ == 0 ) {
-                   curC=clock();
-                   curT = time(NULL); 
-                   double sElapsed = (curC-startC)/CLOCKS_PER_SEC;
-                   double percDone = iPair*100.0 / total_pairs;
-                   double sExpect = sElapsed*100.0/percDone;
-                   std::cerr << "Doing " << ind1 << " " << ind2 << " (" << iPair << "/" << indPairs.len() << " = "
-                             << percDone <<"%% done. Expecting "<< sExpect/60.0 << " CPU mins. Used " << (curT - startT)/60.0
-                             << " wall clock mins. Expected memory usage " << ((totalCalledMarkers * 2.0 * 4.0 * sizeof(%(cType)s)) * (100.0/percDone)) / ((double)(((long)2)<<30))
-                             << "GB ) Estimated diploid kinship: " << totalCalledMarkers *1.0 / (endM * 1.0 * iPair + 1e-3) << std::endl;
-                   }
-               // Forward  // TODO: Get rid of endM i.e. find it out in C side.
-
-            // First step
-            for(p=0;p<5;p++) {
-               //ca2p(p,0) = firstCP2P(p); //0.0;
-               ca2p(p,0) = 0.0;
-
-               bt(p,0) = -1;
-
-            }
-
-
-               for(ij=0,j=0;j<=endM;j++,ij++) {
-                 tot_min_ca2p = 1e308;
-
-                 // ca_j -> p_j
-                 // TODO: Don't minimize exhaustively, but try to be smart with structure of CPT etc.
-                 for(p=0;p<5;p++) {
-                    ca2p(p,ij+1) = 1e307;
-                    min_ca2p = 1e308;
-                    
-                    for(int p0=0; p0<5; p0++) {
-                       for(h0=0;h0<4;h0++) {
-                         for(h1=0;h1<4;h1++) {
-                            ca2p(p,ij+1) = std::min(ca2p(p,ij+1), CPT(j, p0 ,p,h0,h1) + hLike(ind1,j,h0) + hLike(ind2,j,h1) + ca2p(p0, ij) );
-                         }
-                       }
-                       if(min_ca2p > ca2p(p,ij+1) ) {
-                       
-                          if( p!= 4 || p0 != 4 || min_ca2p - ca2p(p,ij + 1) > 1.38) {  // If prob 4 is < 0.5
-                              bt(p,j+1)=p0;
-                              min_ca2p = ca2p(p,ij+1);
-                          }
-                       }
-
-                    }
-                    tot_min_ca2p = std::min(tot_min_ca2p,min_ca2p);
-                 }                 
-                 tot_min_ca2p = std::min(tot_min_ca2p, ca2p(4,ij+1));
-                 // Normalize
-                 for(p=0;p<5;p++) {
-                    ca2p(p,ij+1) -= tot_min_ca2p;
-                 }
-              }
-
-              double c_ca2p[5];
-              for(int p=0;p<5;p++)
-                  c_ca2p[p] = ca2p(p,ij+1);
-// redo here.
-
-              for(int p=0;p<5;p++)
-                  assert(c_ca2p[p] == ca2p(p,ij+1));
-                  
-
-
-
-               firstP=4;
-
-               min_val=1e308,max_val=0.0;
-
-               for(int p=4;p>=0; p--) {
-                   double val = ca2p(p,endM+1) ;//+ firstCP2P(p);
-                   //printf("%%g, ",val);
-                   if(val < min_val) {
-                       min_val = val;
-                       firstP = p;
-                   }
-                   if( val > max_val) {
-                       max_val=val;
-                   }
-               }
-
-               if(max_val<1e-15) {
-                   firstP=4;
-               }
-
-               //std::cout<<"  => "<<firstP<<std::endl;
-
-
-               int endMark = endM;
-
-
-               int curState;
-               int i = endM;
-               //int *h1map = {0, 1, 0, 1};
-               //int *h2map = {0, 0, 1, 1};
-
-
-               //for(int p = bt(4,endM); p >= 0; ) {
-               for(int p = firstP; i>0 && p >= 0; ) {
-                   curState = p;
-                   endMark = i;
-                   
-                   while( curState == p ) {
-                       p = bt(p,i);
-                       i--;
-                   }
-                   if( curState < 4 ) {
-                       PY_END_ALLOW_THREADS;
-                       py::tuple new_IBD(4);
-                       new_IBD[0] = ind1 * 2;
-                       new_IBD[1] = ind2 * 2;
-                       new_IBD[2] = i + 1;
-                       new_IBD[3] = endMark;
-                       ibdRegions.append(new_IBD);
-                       totalCalledMarkers += endMark - i;
-                       PY_BEGIN_ALLOW_THREADS
-                   }
-                   
-
-               }
-               
-               PY_END_ALLOW_THREADS;
-
-            }
-            """
-            
 
 
             
@@ -1717,25 +1560,28 @@ class longRangePhase:
       endM=self.markers-1
 
       # Compile:  Make a dummy pass with no real input to compile the code if necessary.
-      __indPairs=indPairs
-      indPairs=[]
-      self.__lock_inlining()
-      weave.inline(codeNormBT%{"cType":self.cDataType}, \
-                   ["bt",'firstCP2P',"hLike","indPairs","ca2p","endM","CPT","ibdRegions"], \
-                   type_converters=converters.blitz,compiler="gcc",verbose=2,force=False,
-                   extra_compile_args=["-O3"],support_code="#include<time.h>\n#include<cstdlib>")
-      indPairs=__indPairs
-      self.__unlock_inlining()
+#       __indPairs=indPairs
+#       indPairs=[]
+#       self.__lock_inlining()
+#       weave.inline(codeNormBT%{"cType":self.cDataType}, \
+#                    ["bt",'firstCP2P',"hLike","indPairs","ca2p","endM","CPT","ibdRegions"], \
+#                    type_converters=converters.blitz,compiler="gcc",verbose=2,force=False,
+#                    extra_compile_args=["-O3"],support_code="#include<time.h>\n#include<cstdlib>")
+#       indPairs=__indPairs
+#       self.__unlock_inlining()
       # end compile
       
       indPairs=list(indPairs)
-      weave.inline(codeNormBT%{"cType":self.cDataType}, \
-                   ["bt",'firstCP2P',"hLike","indPairs","ca2p","endM","CPT","ibdRegions"], \
-                   type_converters=converters.blitz,compiler="gcc",verbose=2,force=False,
-                   extra_compile_args=["-O3"],support_code="#include<time.h>\n#include<cstdlib>")
-#                   type_converters=converters.blitz,compiler="gcc",verbose=2,force=self.firstPhase,extra_compile_args=["-msse2","-ftree-vectorize","-ftree-vectorizer-verbose=0","-g"])
+      self.c_ext.scan_IBD_hmm(bt,firstCP2P,hLike,indPairs,ca2p,endM,CPT,ibdRegions)
+      
+#       weave.inline(codeNormBT%{"cType":self.cDataType}, \
+#                    ["bt",'firstCP2P',"hLike","indPairs","ca2p","endM","CPT","ibdRegions"], \
+#                    type_converters=converters.blitz,compiler="gcc",verbose=2,force=False,
+#                    extra_compile_args=["-O3"],support_code="#include<time.h>\n#include<cstdlib>")
+# #                   type_converters=converters.blitz,compiler="gcc",verbose=2,force=self.firstPhase,extra_compile_args=["-msse2","-ftree-vectorize","-ftree-vectorizer-verbose=0","-g"])
       self.firstPhase=False
 
+      ibdRegions = numpy.array(ibdRegions,dtype=int)
       return ibdRegions
 
 
@@ -2227,6 +2073,7 @@ class longRangePhase:
 
   
    def processAllocedIBD(self,allocedIBD,MAPestimate=True):
+      "Run one iteration of message passing over messages, preallocated in allocedIBD"
       startTime = time.time()
       totMeanSqrE = self.c_ext.processAllocedIBD(allocedIBD,self.hLike, self.CPT,self.dampF,self.firstCP2P,MAPestimate)
       doneTime = time.time()
@@ -2235,6 +2082,7 @@ class longRangePhase:
       return totMeanSqrE
 
    def iterateOverIBD(self,allocedIBD,iterations,intermedFAD=None,intermedIBD=None,use_max_product=True):
+      "Choose the correct method to do the iteration proper"
       goldStandard = False
 
       #allocedIBD = allocedIBD[allocedIBD["beginMarker"]<10]
@@ -2248,6 +2096,8 @@ class longRangePhase:
    def iterateOverIBDsum(self,allocedIBD,iterations,intermedFAD=None,intermedIBD=None):
       "Do the phasing proper, with the sum-product algorithm, trying to find the phase marginals"
 
+
+      raise "Don't come here"
       self.hLike = self.normalizedLike()
       #allocedIBD = allocedIBD[allocedIBD['ind1firstHaplo'] == 0]
       self.CPT = numpy.exp(-self.CPT)
@@ -2872,8 +2722,11 @@ class longRangePhase:
       self.computeGenos()
       self.computeLogLikeTable()
       
-      if self.poolSize <= 1:
-         ibdRegions=self.__computeOneIBDnoUpdate( allPairs )
+      if self.poolSize <= 1 or numPairs < 3 * self.poolSize :
+         if self.poolSize > 1:
+            self.set_workers(1)
+            
+         ibdRegions=self.computeOneIBDnoUpdate( allPairs )
       else:
          #TODO: use numpy rec arrays instead of lists. Should be much faster.
          chunkSize = int( numPairs * 1.0 / self.poolSize + 1) 
@@ -2883,12 +2736,16 @@ class longRangePhase:
          subsetPairs=[allPairs[i:(i+chunkSize),:] for i in range(0, numPairs, chunkSize) ]
          
          printerr("subsets",len(subsetPairs),[len(x) for x in subsetPairs])
-         ibdRegions = self.pmap(self.__computeOneIBDnoUpdate, subsetPairs )
+         ibdRegions = self.pmap(self.computeOneIBDnoUpdate, subsetPairs )
          ibdRegions = numpy.concatenate(ibdRegions)
          newTime = time.time()
 
 
       candidateCount = ibdRegions.shape[0]
+      ibdScore = self.snpCMpos[ibdRegions[:,3]] - self.snpCMpos[ibdRegions[:,2]]
+      ibdScore.shape = (-1,1)
+      ibdRegions = numpy.hstack((ibdRegions,(1000*ibdScore))) # Score as integer milliMorgans
+      ibdRegions = numpy.ascontiguousarray(ibdRegions,dtype=numpy.int32)
       #ibdRegions=ibdRegions[(ibdRegions[:,0]==4)]
       #&(ibdRegions[:,2]<=3896)&(ibdRegions[:,3]>=4015)]
       #ibdRegions[:,0]=ibdRegions[:,1]
@@ -2935,7 +2792,7 @@ class longRangePhase:
 
       assert peakThreshold > 0
       assert dipThreshold > 0
-      if self.poolSize <= 1:
+      if self.poolSize <= 1 or self.indivs < self.poolSize * 3 :
          ibdRegions=self.c_ext.LLscan_and_filter(0,self.indivs,self.geno,self.LLtable,peakThreshold,dipThreshold,min_cover,min_ibd_length )
       else:
          chunkSize = int( self.indivs * 1.0 / self.poolSize + 1) 
@@ -3050,7 +2907,9 @@ class longRangePhase:
          printerr("Allocated %gGB for %d IBD regions overlapping markers %d - %d"%( sum(x[4].nbytes+x[5].nbytes+x[6].nbytes for x in allocedIBD) * 1.0 / 2.0**30,
                                                                                     len(allocedIBD), firstBase, min(self.markers, lastBase) ))
 
-         if self.poolSize <= 1:
+         if self.poolSize <= 1 or len(allocedIBD) < 2*self.poolSize:
+            if self.poolSize > 1:
+               self.set_workers(1)
             self.iterateOverIBD(allocedIBD,iterations,intermedFAD=intFADbase,intermedIBD=intIBDbase,use_max_product=use_max_product)
          else:
             # Threading
