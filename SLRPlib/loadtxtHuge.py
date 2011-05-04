@@ -191,6 +191,7 @@ def loadtxt(fname, dtype=float, comments='#', delimiter=None, converters=None,
             X = X.view(dtype)
         else:
             X = np.fromiter(itertools.chain(*data_gen), dtype = dtype,count=count)
+            X.shape = (-1,N)
     finally:
         if isstring:
             fh.close()
