@@ -72,3 +72,14 @@ def _functionId(nFramesUp=0):
     co = sys._getframe(nFramesUp+1).f_code
     return "%s (%s @ %d)" % (co.co_name, co.co_filename, co.co_firstlineno)
 
+
+
+def takewhile2(predicate, iterable):
+   "Take items up to, and including, first that fails predicate"
+   # takewhile(lambda x: x<5, [1,4,5,6,4,1]) --> 1 4 5
+   for x in iterable:
+      if predicate(x):
+         yield x
+      else:
+         yield x
+         break 

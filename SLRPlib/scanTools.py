@@ -1653,8 +1653,8 @@ class c_ext:
         p2h2 =  allocedIBD["p2h2"]
         prevMeanSqrDiff =  allocedIBD["prevMeanSqrDiff"]
 
-        #assert CPT.flags.c_contiguous, "CPT must be c-contiguous"
-        assert hLike.flags.c_contiguous, "CPT must be c-contiguous"
+        assert CPT.flags.c_contiguous, "CPT must be c-contiguous"
+        assert hLike.flags.c_contiguous, "hLike must be c-contiguous"
         if MAPestimate:
             return self._processAllocedIBD(ind1, ind2,  beginMarker,  endMarker, p2h1, p2h2,  prevMeanSqrDiff,hLike,CPT,dampF,firstCP2P)
         else:

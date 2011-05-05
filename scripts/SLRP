@@ -56,10 +56,18 @@ def process_args():
                      help="Name of the genotype file in FAD format.  REQUIRED  [default:%default]",
                      metavar="FILE"#,default="Kuusamo_370K_genotypes.hapMapIntersect.chr23.fad"
                      )
+   parser.add_option("-v", "--vcfFile", dest="vcfFile",
+                     help="Name of the VCF file with genotypes included.  [default:%default]",
+                     metavar="FILE"#,default="Kuusamo_370K_genotypes.hapMapIntersect.chr23.fad"
+                     )
+   parser.add_option("-t", "--tpedFile", dest="tpedFile",
+                     help="Name of the genotype file in tped fromat with genotypes coded as A,C,G,T.  [default:%default]",
+                     metavar="FILE"#,default="Kuusamo_370K_genotypes.hapMapIntersect.chr23.fad"
+                     )
 
    parser.add_option("-o", "--outFile", dest="outFile",
                      help="Name of the long range phased FAD output file  [default:%default]",
-                     metavar="FILE",default=None
+                     metavar="FILE",default="SLRP.out"
                      )
 
 
@@ -211,7 +219,7 @@ def process_args():
 
    (options, args) = parser.parse_args()
 
-   if options.fadFile is None:
+   if options.fadFile is None and options.tpedFile is None and options.vcfFile is None:
       printerr("Input FAD file needed. Sorry!")
       parser.print_help()
       sys.exit()
@@ -307,14 +315,17 @@ def main():
       
       if mpi_rank == 0:
 
+         rlp.setErrP(options.errP)
          rlp.setCallThreshold(options.callThreshold)
          printerr("Reading fad %s"%(options.fadFile))
+         printerr("Reading tped %s"%(options.tpedFile))
+         printerr("Reading vcf %s"%(options.vcfFile))
          try:
-            rlp.loadFAD( options.fadFile )
+            rlp.loadGeno( options.fadFile, options.tpedFile, options.vcfFile )
          except IOError,e:
             printerr(str(e))
             return False
-         printerr("Read FAD for %d individuals and %d markers!"%(rlp.indivs,rlp.markers))
+         printerr("Read genotypes for %d individuals and %d markers!"%(rlp.indivs,rlp.markers))
 
          if options.freqFile is not None:
             try:
@@ -344,13 +355,13 @@ def main():
          if options.geneticMap is not None:
             printerr("Reading genetic map")
             try:
-               rlp.loadGeneticMap( open(options.geneticMap) )
+               rlp.loadGeneticMap( options.geneticMap )
             except IOError,e:
                printerr(str(e))
                return False
             printerr("Read genetic map!")
 
-         rlp.initMessages( options.ExpectedIBS, options.ExpectedIBD, errP = options.errP )
+         rlp.initMessages( options.ExpectedIBS, options.ExpectedIBD )
          #rlp.visualiseCPT( fname = "CPT_ibs%g_ibd%g.png"% (options.ExpectedIBS, options.ExpectedIBD) )
          #sys.exit()
 
@@ -427,7 +438,7 @@ def main():
       if mpi_rank == 0:
          printerr("Writing output FAD to",options.outFile)
          rlp.writeFAD(options.outFile, options.out_inferred_genotypes)
-
+         rlp.writeFAM(addSuffix(options.outFile,".fam"))
          if options.outQualFile is not None:
             printerr("Writing quality scores to",options.outQualFile)
             rlp.writeQual(options.outQualFile)

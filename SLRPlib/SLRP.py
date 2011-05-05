@@ -167,8 +167,9 @@ except ImportError:
 
 # Improve the perfomance of loading huge text files.
 try:
-   import loadtxtHuge
-   numpy.loadtxt = loadtxtHuge.loadtxt
+   pass
+   #import loadtxtHuge
+   #numpy.loadtxt = loadtxtHuge.loadtxt
 except ImportError,e:
    printerr("Couldn't find loadtxtHuge module. Loading huge text matrices will take time!")
 
@@ -754,7 +755,8 @@ class longRangePhase:
       self.dampF = dampF
 
       
-   def __setErrP(self,errP):
+   def setErrP(self,errP):
+      "Set prior error probability for array genotypes"
       self.errP = errP
 
       logG0err=-2*numpy.log(1-errP)
@@ -774,11 +776,11 @@ class longRangePhase:
       self.logG = dict( (g,tuple(x+gZ[g] for x in self.logG[g])) for g in range(3) )
 
       # For partially phased input
-      self.logG_part={"00":[logG0err,logG1err,logG1err,logG2err],
-                      "11":[logG2err,logG1err,logG1err,logG0err],
-                      "22":[logG1err,logHetErr,logHetErr,logG1err],
-                      "10":[logG1err,logG0err,logG1err,logG1err],
-                      "01":[logG1err,logG1err,logG0err,logG1err]}
+      self.logG_part={(0,0):[logG0err,logG1err,logG1err,logG2err],
+                      (1,1):[logG2err,logG1err,logG1err,logG0err],
+                      (2,2):[logG1err,logHetErr,logHetErr,logG1err],
+                      (1,0):[logG1err,logG0err,logG1err,logG1err],
+                      (0,1):[logG1err,logG1err,logG0err,logG1err]}
 
 
       gZ = dict((g, numpy.log(sum(numpy.exp(-x) for x in self.logG_part[g])) ) for g in self.logG_part.keys() )
@@ -793,6 +795,211 @@ class longRangePhase:
       self.__minDif = min(x-y for x in altValues for y in altValues if x>y)
 
 
+   def loadGeno(self, fadFileName = None, tpedFileName = None, vcfFileName = None):
+      "Load input genotypes in any format"
+      self.indivs = 0
+      self.markers = 0
+      self.snpPos = numpy.empty((self.markers,), dtype = int)
+      self.snpCMpos = numpy.empty((self.markers,), dtype = float )
+      self.haplos = numpy.empty((self.markers,self.indivs,2),  dtype = numpy.int8)
+#      self.zeroAF = numpy.empty((self.markers,), dtype = float )
+      self.famInfo = []
+      
+      if fadFileName is not None:
+         self.loadFAD(fadFileName)
+
+      if tpedFileName is not None:
+         self.loadTPED(tpedFileName)
+
+      printerr("Setting prior likelihoods")
+      self.__setLikelihoods()
+
+      if vcfFileName is not None:
+         self.loadVCF(vcfFileName)
+
+      self.hLike = numpy.ascontiguousarray(self.hLike)
+      self.hLike = self.hLike.view(ndarray_ADD)
+
+      self.snpCMpos =  self.snpPos * self.__mean_recomb_rate
+      if not hasattr(self,"zeroAF"):
+         printerr("Prior allele frequency distribution is Beta(%g,%g)."%(1.0,1.0))
+         self.zeroAF = self.estimateZeroAlleleFrequencies()
+
+
+   def loadVCF(self, vcfFileName):
+      "Load VCF file with genotype likelihoods. Assume single chromosome with biallelic snps. VCF file must have PL filed with List of Phred-scaled genotype likelihoods, number of values is (#ALT+1)*(#ALT+2)/2"
+
+      vcfFile = open(vcfFileName)
+      magicLine = vcfFile.readline().strip()
+      if magicLine != "##fileformat=VCFv4.1":
+         printerr("Your VCF file has %s, which might cause trouble. I'm only prepared for VCFv4.1 (ish)."%(magicLine))
+
+      vcfHeader = list(tools.takewhile2(lambda x:x[:6]!="#CHROM",vcfFile))
+      #vcfFile = it.dropwhile(lambda x:x[:6]!="#CHROM",vcfFile)
+      CHROMline = vcfHeader[-1].strip().split()
+      indivs = CHROMline[9:]
+      n_indivs = len(indivs)
+
+      VCFlines = (x.split() for x in vcfFile if x[0]!="#")
+      def parseVCFsite(vcf_rec):
+         PLidx = vcf_rec[8].split(":").index("PL")
+         
+         #r = [int(vcf_rec[1])]
+         PL=[]
+         for s_rec in vcf_rec[9:]:
+            PL.append(tuple(map(int,s_rec.split(":")[PLidx].split(","))))
+         return (int(vcf_rec[1]),vcf_rec[3],vcf_rec[4], tuple(PL))
+
+      #VCFsites = it.chain(*(parseVCFsite(x)    for x in VCFlines if x[6]=="PASS"))
+      VCFsites = (parseVCFsite(x)    for x in VCFlines if x[6]=="PASS")
+
+      VCFdata = numpy.fromiter(VCFsites,dtype = [ ("bpPos",">i8"), ("zeroAllele","|S1"), ("oneAllele","|S1"),("geno_like",">i8",(n_indivs,3))] )
+      #VCFdata = numpy.fromiter(VCFsites,dtype = [ ("bpPos",">i8"), ("geno_like",">i8",(n_indivs,3))] )
+      #VCFdata = numpy.fromiter(VCFsites,dtype = [ ("bpPos",">i8"), ("zeroAllele","|S1"), ("oneAllele","|S1")] )
+      #VCFdata = numpy.fromiter(VCFsites,dtype =">i8" )
+      #VCFdata = VCFdata.view([ ("bpPos",">i8"), ("geno_like",">i8",(n_indivs,3))] )
+
+      n_markers = len(VCFdata)
+      vcfLike = numpy.empty((n_indivs,n_markers,4),dtype = self.dataType)
+      vcfLike[:,:,0] = 0.1*VCFdata["geno_like"][:,:,0].T/numpy.log(10.0)
+      vcfLike[:,:,1] = 0.1*VCFdata["geno_like"][:,:,1].T/numpy.log(10.0) - numpy.log(0.5)  # Split the het likelihood to the two phases
+      vcfLike[:,:,2] = vcfLike[:,:,1] 
+      vcfLike[:,:,3] = 0.1*VCFdata["geno_like"][:,:,2].T/numpy.log(10.0)
+
+      genoHapTempl = numpy.array([[0,0],[2,2],[1,1]], dtype=numpy.int8)
+      vcfHaplos = genoHapTempl[VCFdata["geno_like"].argmin(axis=2)]
+
+
+
+      allPos = numpy.concatenate((VCFdata["bpPos"], self.snpPos))
+      uniqPos,uniqInd,uniqInv = numpy.unique( allPos, return_index = True, return_inverse = True)
+      # uniqPos is sorted
+      
+      new2vcf = uniqInv[:n_markers]
+      new2old = uniqInv[n_markers:]
+
+      tot_markers = len(uniqPos)
+      tot_indivs = n_indivs + self.indivs
+
+
+      new_like = numpy.empty((tot_indivs, tot_markers, 4), dtype = self.dataType, order = "C")
+      new_like[:self.indivs, new2old,:] = self.hLike
+      new_like[self.indivs:, new2vcf,:] = vcfLike
+
+      new_haplos = numpy.empty((tot_markers, tot_indivs, 2), dtype = int )
+      new_haplos[:] = 3
+      new_haplos[new2old, :self.indivs, : ] = self.haplos
+      new_haplos[new2vcf, self.indivs:, : ] = vcfHaplos
+      
+
+      # Check, and possibly flip alleles
+      vcf_alleles = VCFdata[["zeroAllele","oneAllele"]].view("|S1").reshape((-1,2))
+#       all_alleles = numpy.concatenate((self.alleles, vcf_alleles))
+#       allele_order = uniqInv.argsort()
+#       allele_grps = numpy.hstack((uniqInv[allele_order].reshape((-1,1)), all_alleles[allele_order]))
+#       grps = it.groupby(allele_grps, lambda x:x[0])
+      
+      
+      new_alleles = numpy.zeros((tot_markers,2), dtype = "|S1")
+      new_alleles[new2old] = self.alleles
+
+      (new_alleles[new2vcf] == vcf_alleles).prod(axis=1)
+
+
+      # Watson-Crick base pairing
+      WC = { "A":"T",
+             "C":"G",
+             "G":"C",
+             "T":"A"}
+      bad_snps = set()
+
+      for i,a in enumerate(vcf_alleles):
+         if (a == new_alleles[new2vcf[i]] ).all():
+            continue
+         elif (new_alleles[new2vcf[i]] == ["",""] ).all() or \
+                  a[0] == WC[new_alleles[new2vcf[i]][0]] and a[1] == WC[new_alleles[new2vcf[i]][1]]:
+            # The reported strand is different, but the genotypes are OK, or this is a new site
+            new_alleles[new2vcf[i]] = a
+            continue
+         elif (a[::-1] == new_alleles[new2vcf[i]] ).all() \
+                  or ( a[1] == WC[new_alleles[new2vcf[i]][0]] and a[0] == WC[new_alleles[new2vcf[i]][1]] ):
+            if ( a[1] == WC[new_alleles[new2vcf[i]][0]] and a[0] == WC[new_alleles[new2vcf[i]][1]] ):
+               new_alleles[new2vcf[i],0] = WC[a[1]]
+               new_alleles[new2vcf[i],1] = WC[a[0]]
+               
+            # Flip haplotypes
+            h = new_haplos[new2vcf[i],:self.indivs,:]
+            h[h<2] = 1 - h[h<2]
+            new_haplos[new2vcf[i],:self.indivs,:] = h
+            
+            new_like[:self.indivs,new2vcf[i],:] = new_like[:self.indivs,new2vcf[i],::-1]
+         else:
+            printerr("Bad alleles for %dth snp at %d: VCF:%s <-> prior:%s"%(i, uniqPos[new2vcf[i]], str(a), str(new_alleles[new2vcf[i]])))
+            bad_snps.add(new2vcf[i])
+            
+      printerr("Found %d discordant allele snps"%(len(bad_snps)))
+
+      bad_mask = numpy.ones(len(uniqPos))==1
+      for i in bad_snps:
+         bad_mask[i] = False
+
+      self.hLike = new_like[:,bad_mask,:]
+      self.haplos = new_haplos[bad_mask,:,:]
+      self.markers, self.indivs = self.haplos.shape[:2]
+      self.snpPos = uniqPos[bad_mask]
+      self.alleles = new_alleles[bad_mask]
+      self.famInfo.extend(indivs)
+      
+      #pdb.set_trace() 
+
+
+   def loadTPED(self, tpedFileName):
+      "Load genotypes in tped format, with allelic codes"
+      # TODO: fail if cant find
+      assert self.indivs == 0, "Can't append individuals yet"
+
+      tfamFile = open(tpedFileName+".tfam")
+
+      tfam = [ " ".join(x.strip().split()[:2]) for x in tfamFile ]
+      self.famInfo.extend(tfam)
+      self.indivs = len(self.famInfo)
+
+      tpedIndivs = len(tfam)
+      tpedFile = open(tpedFileName+".tped")
+      self.tped =  numpy.loadtxt(tpedFileName+".tped",dtype = [ ("chrom",">i1"),("rsID","|S20"),("cmPos","f8"),("bpPos",">i8"), ("haplos","|S1",(tpedIndivs*2,) )] )
+      tpedMarkers = self.tped.shape[0]
+
+      tpedAlleles = numpy.fromiter((numpy.intersect1d(x,"ACGT") for x in self.tped["haplos"]),dtype=[('zero',"|S1"),('one',"|S1")])
+      self.alleles = tpedAlleles.view("|S1")
+      self.alleles.shape = (tpedMarkers, 2)
+      numAlleles = tpedAlleles.view("int8")
+      numAlleles.shape = (tpedMarkers,2)
+
+
+      hapView = self.tped["haplos"].view("int8")
+      hapView.shape = (tpedMarkers,self.indivs,2)
+
+      self.haplos = numpy.empty(hapView.shape,dtype="int8")
+      self.haplos[:] = 3
+      hets = hapView[:,:,0]!=hapView[:,:,1]
+      self.haplos[hets] = 2
+      notHets = hets==False
+      for i in range(self.haplos.shape[1]):
+         self.haplos[numpy.logical_and(notHets[:,i],numAlleles[:,0] == hapView[:,i,0]),i,:] = 0
+         self.haplos[numpy.logical_and(notHets[:,i],numAlleles[:,1] == hapView[:,i,0]),i,:] = 1
+
+      assert self.haplos.var(axis=2).max()==0.0
+
+      self.markers = tpedMarkers
+      self.snpPos = self.tped["bpPos"]
+      if self.tped["cmPos"].var() == 0:
+         self.snpCMpos =  self.snpPos * self.__mean_recomb_rate
+      else:
+         self.snpCMpos = self.tped["cmPos"]
+
+      assert 0<= self.haplos.min() < self.haplos.max() <= 3, "Funny allele values for haplotypes"
+      
+            
    def loadFAD(self, fadFileName):
       "Load the input file in FAD format"
       def fadFormatter(fad_line):
@@ -804,8 +1011,11 @@ class longRangePhase:
 
       fline = fadFile.readline().strip().split()
       self.indivs = len(fline[1]) / 2
+      self.famInfo.extend("%s_ind%d"%(fadFileName,i) for i in range(self.indivs))
+      
 
-
+      assert self.snpPos.shape[0] == 0, "FAD must be the first file format to read"
+      
       self.fad = numpy.loadtxt(fadFileName,dtype = [ ("pos",">i8"), ("haplos","|S%d"%(self.indivs*2) )] )
       self.snpPos = self.fad["pos"]
       self.snpCMpos =  self.snpPos * self.__mean_recomb_rate
@@ -819,11 +1029,10 @@ class longRangePhase:
       #self.snpPos = [ p for p,_ in self.fad ]
       #self.snpCMpos=[ float(p) / 1e6 for p in self.snpPos ]
       self.set_slice_len()
-
+      self.alleles = numpy.fromiter( it.cycle("01"),dtype="|S1", count = 2*self.markers)
+      self.alleles.shape = (self.markers,2)
       # Regularize the allele frequency estimate with symmetric beta prior
-      if not hasattr(self,"zeroAF"):
-         printerr("Prior allele frequency distribution is Beta(%g,%g)."%(1.0,1.0))
-         self.zeroAF = self.estimateZeroAlleleFrequencies()
+
       
 
 
@@ -840,7 +1049,7 @@ class longRangePhase:
 
          mask = numpy.in1d(break_marker_indiv[:,0], indivsWithoutPhase)
 
-         self.hLike[break_marker_indiv[mask,0], break_marker_indiv[mask,1]] = self.logG_part["01"]
+         self.hLike[break_marker_indiv[mask,0], break_marker_indiv[mask,1]] = self.logG_part[(0,1)]
          return sum(mask)
       else:
          return 0
@@ -870,12 +1079,14 @@ class longRangePhase:
 
       printerr("Memory for likelihoods %gMB"%(self.hLike.nbytes*1.0/(2.0**20)))
 
-      for snpID,(f,genos) in enumerate(it.izip(self.zeroAF,self.fad["haplos"])):
+      logG_part_get = self.logG_part.get
+      for snpID,genos_pairs in enumerate(self.haplos):
+#for snpID,(f,genos) in enumerate(it.izip(self.zeroAF,self.fad["haplos"])):
           missing = [ 0.0, 0.0, 0.0, 0.0 ]
 
           #self.hLike[:,snpID,:]=numpy.array([ self.logG.get(int(g),missing) for i,g in enumerate(genos) if i%2==0])
 
-          genos_pairs = ( genos[i:i+2] for  i in range(0,len(genos),2) )
+          #genos_pairs = ( genos[i:i+2] for  i in range(0,len(genos),2) )
 #  Start Wed Oct 06 11:31:27 BST 2010
           # Alternative way of filling the likelihood table
           #self.hLike[:,snpID,:] = numpy.array([ self.logG_part.get(g,missing) for g in genos_pairs], dtype = self.dataType)
@@ -883,8 +1094,8 @@ class longRangePhase:
           #genos_pairs=list(genos_pairs)
           #print list(it.chain(*(self.logG_part.get(g,missing) for g in genos_pairs)))
 
-          self.hLike[:,snpID,:] = numpy.fromiter(it.chain(*(self.logG_part.get(g,missing) for g in genos_pairs)),
-                                                 count = len(genos)*2, dtype = self.dataType).reshape(self.hLike[:,snpID,:].shape)
+          self.hLike[:,snpID,:] = numpy.fromiter(it.chain(*(logG_part_get(tuple(g),missing) for g in genos_pairs)),
+                                                 count = len(genos_pairs)*4, dtype = self.dataType).reshape(self.hLike[:,snpID,:].shape)
 
 
 #           # Add non uniform prior for the diplotypes.
@@ -920,7 +1131,7 @@ class longRangePhase:
 
          state01 = self.hLike[:,:,1] # No copy, just a view
          noiseFactor = numpy.random.uniform(low = 1.0 - hetNoiseLevel, high = 1.0 + hetNoiseLevel, size = state01.shape)
-         noiseFactor[state01 != self.logG_part["22"][1]] = 1.0
+         noiseFactor[state01 != self.logG_part[(2,2)][1]] = 1.0
 
          self.hLike[:, :, 1] += numpy.log(noiseFactor)
          self.hLike[:, :, 2] += numpy.log(2-noiseFactor)
@@ -931,13 +1142,9 @@ class longRangePhase:
 
 
 
-   def initMessages(self, expect_IBS = 1.5, expect_IBD = 15.0, errP = 1e-3 ):
+   def initMessages(self, expect_IBS = 1.5, expect_IBD = 15.0):
       self.expect_IBS = expect_IBS
       self.expect_IBD = expect_IBD
-      printerr("Setting missing data prior")
-      self.__setErrP(errP)
-      printerr("Setting prior likelihoods")
-      self.__setLikelihoods()
       printerr("Setting phase probability tables")
       self.__set_CPT()
 
@@ -1235,6 +1442,7 @@ class longRangePhase:
 
       assert numpy.allclose(numpy.exp(-self.CPT[1:,]).sum(axis=2),1.0)
 
+      self.CPT = numpy.ascontiguousarray(self.CPT)
 
       
 
@@ -1242,36 +1450,32 @@ class longRangePhase:
 
 
    def loadGeneticMap(self, geneticMap):
-      "Load genetic map in ~hapmap format"
+      "Load genetic map in hapmap format"
 
       #       printerr("Reading genetic map %s"%(options.geneticMap))
-      try:
-         cMposes=sorted((int(pos),float(cMpos),float(rRate)) for pos,chrom,rsName,junk,rRate,cMpos in (x.strip().split() for x in geneticMap))
-         #/lustre/scratch103/sanger/kp5/Kuusamo/popSimulation/snps_chr20_370K.geneticPos.txt
-      except ValueError:
-         cMposes=sorted((int(pos),float(cMpos),float(rRate)) for pos,rRate,cMpos in (x.strip().split() for x in geneticMap if x[0].isdigit()))
 
-      sI=0
-      self.snpCMpos=[]
-      prevCMpos,prevBPpos=0.0,0
-      for bpPos,cMpos,rRate in cMposes:
-         if sI >= len(self.snpPos):
-            break
-         if self.snpPos[sI] == bpPos:
-            self.snpCMpos.append(cMpos)
-            sI+=1
-         elif self.snpPos[sI] < bpPos:
-            self.snpCMpos.append( (cMpos*bpPos+prevCMpos*prevBPpos)/(bpPos+prevBPpos) )
-            sI+=1
-         prevCMpos,prevBPpos=cMpos,bpPos
+      gmFile = open(geneticMap)
+      header = gmFile.readline()
+      header = header.strip().split()
+      if len(header) == 4:
+         gmap = numpy.loadtxt(gmFile, dtype = [ ("Chrom","|S10"), ("bpPos",numpy.int), ("rate",numpy.float), ("cmPos", numpy.float) ] )
+      elif len(header) == 3:
+         gmap = numpy.loadtxt(gmFile, dtype = [ ("bpPos",numpy.int), ("rate",numpy.float), ("cmPos", numpy.float) ] )
+      else:
+         raise Exception("Malformatted genetic map file. Need 3-4 columns: chromosome(optional) bp_position recomb_rate centiMorgan_position")
 
-      if len(self.snpCMpos) < len(self.snpPos): # Assume telomeric recombination rate 1cM/Mbp
-         self.snpCMpos.extend( (cMposes[-1][1] + self.__mean_recomb_rate*(p-cMposes[-1][0]) for p in self.snpPos[len(self.snpCMpos):]) )
+      numpy.diff(gmap["cmPos"])
+      map_offset = gmap["rate"][0]*gmap["bpPos"][0]*1e-6
+      way_past_cm = gmap["cmPos"][-1] + map_offset + \
+                    gmap["rate"][-1]*gmap["bpPos"][-1]*1e-6
 
-
-      self.snpCMpos = numpy.array(self.snpCMpos)
-      self.snpPos = numpy.array(self.snpPos)
-
+      gmap = gmap[ numpy.diff(gmap["cmPos"]) > 1e-5 ]
+      self.snpCMpos = numpy.interp(self.snpPos,
+                                   numpy.concatenate(([0], gmap["bpPos"], [ gmap["bpPos"][-1]*2 ])),
+                                   numpy.concatenate(([0.0],
+                                                      gmap["cmPos"] + map_offset,
+                                                      [ way_past_cm ])))
+                                     
       printerr("Length of chromosome: %d bp, %g cM"%(self.snpPos[-1] - self.snpPos[0]+1,
                                                      self.snpCMpos[-1] - self.snpCMpos[0]))
       assert self.snpPos[-1] - self.snpPos[0]+1 > 0, "Non positive physical chromosome length"
@@ -1508,17 +1712,20 @@ class longRangePhase:
 
    def loadAlleleFrequencies(self,freqFile):
       "Load allele frequency information from the named file"
-      posFreq = numpy.loadtxt(freqFile, dtype = [('pos', '<i8'), ('freq', '<f8')])
+      posFreq = numpy.loadtxt(freqFile, dtype = [('pos', '<i8'), ('freq', '<f8'), ("A0","|S1"), ("A1","|S1")] )
       assert len(posFreq) == self.markers, "Frequency file format error. There has to be frequencies for exactly the given markers"
-      assert numpy.allclose(posFreq["pos"] - self.fad["pos"],0), "Frequency file format error. There has to be frequencies for exactly the given markers"
+      assert numpy.allclose(posFreq["pos"] - self.snpPos,0), "Frequency file format error. There has to be frequencies for exactly the given markers"
+
+      load_A = posFreq[["A0","A1"]].view("|S1").reshape((-1,2))
+      assert (self.alleles == load_A).all(), "Some allele mappings do not match between the genotype data and the allele frequency file"
 
       self.zeroAF = posFreq["freq"].copy()
 
    def writeAlleleFrequencies(self,freqFile):
       "Write allele frequency information to the named file"
-      frq = numpy.vstack((self.fad["pos"], self.zeroAF)).T
+      frq = numpy.vstack((self.snpPos, self.zeroAF, self.alleles.T)).T
       #numpy.savetxt(freqFile,frq,fmt="%d\t%g")
-      numpy.savetxt(freqFile,frq,fmt=["%d","%g"], delimiter="\t")
+      numpy.savetxt(freqFile,frq,fmt=["%s","%s","%s","%s"], delimiter="\t")
       pass
    
    def computeOneIBDnoUpdate(self,indPairs):
@@ -2329,6 +2536,10 @@ class longRangePhase:
    def writeFAD(self,fname,allow_inferred_genotypes=False):
       "Write current haplotypes to file fname in FAD format"
       self.writeFADstrm(open(fname,"w"),allow_inferred_genotypes)
+
+   def writeFAM(self,fname):
+      "Write the sample identifiers to file fname in the order they are output"
+      open(fname,"w").writelines("%s\n"%(x) for x in self.famInfo)
 
    def normalizedLike(self):
       "Return normalized max-margin posteriors ('likelihoods') in range [0-1]"
