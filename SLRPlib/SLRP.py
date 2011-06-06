@@ -676,7 +676,7 @@ class longRangePhase:
       self.CAj = None
       self.CPj = None
       self.firstCP2P = None 
-
+      self.chrom = None
       self.__pylab_lock = threading.Lock()
 
       # Full probability of IBD between two random chromosomes.
@@ -719,7 +719,11 @@ class longRangePhase:
       self.set_mutation_rate()
       self.set_ibd_transition_limit()
 
-      
+
+   def setChromosome(self,chrom):
+      "Set the chromosome to be used"
+      self.chrom = chrom
+
 
    def set_min_ibd_length(self,lim = 0):
       "Set the hard lower limit on IBD segment lengths. Cuts off problematic, very short IBD segments."
@@ -840,7 +844,12 @@ class longRangePhase:
       indivs = CHROMline[9:]
       n_indivs = len(indivs)
 
-      VCFlines = (x.split() for x in vcfFile if x[0]!="#")
+      if self.chrom is None:
+         VCFlines = (x.split() for x in vcfFile if x[0]!="#")
+      else:
+         __chr = self.chrom
+         VCFlines = (x.split() for x in vcfFile if x[0]==__chr)
+         
       def parseVCFsite(vcf_rec):
          PLidx = vcf_rec[8].split(":").index("PL")
          
@@ -967,6 +976,28 @@ class longRangePhase:
       tpedIndivs = len(tfam)
       tpedFile = open(tpedFileName+".tped")
       self.tped =  numpy.loadtxt(tpedFileName+".tped",dtype = [ ("chrom",">i1"),("rsID","|S20"),("cmPos","f8"),("bpPos",">i8"), ("haplos","|S1",(tpedIndivs*2,) )] )
+
+      if self.chrom is not None:
+         # PLINK uses following mapping:
+         #X    X chromosome                    -> 23
+         #Y    Y chromosome                    -> 24
+         #XY   Pseudo-autosomal region of X    -> 25
+         #MT   Mitochondrial                   -> 26
+         chrom2plink = {"X":23,
+                        "Y":24,
+                        "XY":25,
+                        "MT":26}
+         try:
+            __chr = int(self.chrom)
+         except ValueError:
+            __chr = chrom2plink[self.chrom]
+         self.tped = self.tped[ self.tped["chrom"] == __chr ]
+
+      else:
+         self.chrom = str(self.tped["chrom"][0])
+         
+      assert self.tped["chrom"].var() == 0.0, "Tried to give SNPs on more than one chromosome: "+str( numpy.unique(self.tped["chrom"]) )
+      
       tpedMarkers = self.tped.shape[0]
 
       tpedAlleles = numpy.fromiter((numpy.intersect1d(x,"ACGT") for x in self.tped["haplos"]),dtype=[('zero',"|S1"),('one',"|S1")])
@@ -2548,7 +2579,36 @@ class longRangePhase:
       tlike = tlike.transpose((1,2,0))
       return tlike
 
+
+   def genotypeProbs(self):
+      "Return array of genotype (posterior)probabilities"
+      
+      probs = numpy.exp(-self.hLike).transpose((2,0,1))
+      probs /= probs.sum(axis=0)
+      probs = numpy.dstack((probs[0,:,:],probs[1:3,:,:].sum(axis=0), probs[3,:,:]))
+      assert (probs<=1.0).all()
+      assert (probs>=0.0).all()
+      probs[ self.hLike.max(axis=2) < self.maxNoise ] = 0.0
+      return probs.transpose((1,0,2))
    
+   def writeIMPUTE(self,outFile):
+      "Write output in IMPUTE file format"
+
+      CHR = str(self.chrom)
+
+      base = [CHR+" rsX %s","%s","%s"] + ["%s","%s","%s"]*self.indivs
+      base = [CHR+" rsX %d","%c","%c"] + ["%g","%g","%g"]*self.indivs
+
+      gProbs = self.genotypeProbs()
+      assert (numpy.argsort(gProbs.strides) == [1,0,2]).all(), "gProbs is in dubious state for reshaping"
+
+      #outD = numpy.hstack((self.snpPos.reshape((-1,1)),self.alleles.view(numpy.int8),gProbs.reshape( (self.markers,3*self.indivs) ) )
+      outI = it.izip(self.snpPos,self.alleles,gProbs.reshape((self.markers,3*self.indivs)))
+      gen = ("%s rsX %d %s %s "%(CHR,p,A[0],A[1])+" ".join("%g"%(x) for x in gp) for (p,A,gp) in outI)
+
+      open(outFile,"w").writelines(gen)
+      #base%(bpPos,A0,A1) for 
+      
 
    def thresholdCalls(self,phases):
       "Remove phase/imputation calls that are supported too weakly"

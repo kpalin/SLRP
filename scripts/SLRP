@@ -50,6 +50,7 @@ def writeOptions(opts,outstrm=sys.stdout,outFmt="%(optName)s: %(optValue)s\n"):
 
             
 def process_args():
+   import os
    parser = optparse.OptionParser()
 
    parser.add_option("-f", "--fadFile", dest="fadFile",
@@ -67,8 +68,20 @@ def process_args():
 
    parser.add_option("-o", "--outFile", dest="outFile",
                      help="Name of the long range phased FAD output file  [default:%default]",
-                     metavar="FILE",default="SLRP.out"
+                     metavar="FILE",default="SLRP_%d.out"%(os.getpid())
                      )
+   parser.add_option("", "--IMPUTEfile", dest="IMPUTEfile",
+                     help="Output the imputed results to FILE in IMPUTE format  [default:%default]",
+                     default=None,
+                     metavar="FILE"
+                     )
+
+   parser.add_option("-C", "--chrom", dest="chromosome",
+                     help="Use this chromosome (for tped input, this must be 1-22,X,Y,XY or MT)  [default:%default]",
+                     default=None,metavar="CHROM"
+                     )
+
+
 
 
    parser.add_option("-m", "--geneticMap", dest="geneticMap",
@@ -314,7 +327,7 @@ def main():
 
       
       if mpi_rank == 0:
-
+         rlp.setChromosome(options.chromosome)
          rlp.setErrP(options.errP)
          rlp.setCallThreshold(options.callThreshold)
          printerr("Reading fad %s"%(options.fadFile))
@@ -326,6 +339,7 @@ def main():
             printerr(str(e))
             return False
          printerr("Read genotypes for %d individuals and %d markers!"%(rlp.indivs,rlp.markers))
+
 
          if options.freqFile is not None:
             try:
@@ -439,6 +453,10 @@ def main():
          printerr("Writing output FAD to",options.outFile)
          rlp.writeFAD(options.outFile, options.out_inferred_genotypes)
          rlp.writeFAM(addSuffix(options.outFile,".fam"))
+
+         if options.IMPUTEfile is not None:
+            rlp.writeIMPUTE(options.IMPUTEfile)
+            
          if options.outQualFile is not None:
             printerr("Writing quality scores to",options.outQualFile)
             rlp.writeQual(options.outQualFile)
