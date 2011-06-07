@@ -966,16 +966,19 @@ class longRangePhase:
       "Load genotypes in tped format, with allelic codes"
       # TODO: fail if cant find
       assert self.indivs == 0, "Can't append individuals yet"
+      import re
+      tfamFileName = re.sub(r"[.]tped([.]gz)?$",".tfam",tpedFileName)
 
-      tfamFile = open(tpedFileName+".tfam")
+      #tfamFile = open(tpedFileName+".tfam")
+      tfamFile = open(tfamFileName)
 
       tfam = [ " ".join(x.strip().split()[:2]) for x in tfamFile ]
       self.famInfo.extend(tfam)
       self.indivs = len(self.famInfo)
 
       tpedIndivs = len(tfam)
-      tpedFile = open(tpedFileName+".tped")
-      self.tped =  numpy.loadtxt(tpedFileName+".tped",dtype = [ ("chrom",">i1"),("rsID","|S20"),("cmPos","f8"),("bpPos",">i8"), ("haplos","|S1",(tpedIndivs*2,) )] )
+      #tpedFile = open(tpedFileName)
+      self.tped =  numpy.loadtxt(tpedFileName,dtype = [ ("chrom",">i1"),("rsID","|S20"),("cmPos","f8"),("bpPos",">i8"), ("haplos","|S1",(tpedIndivs*2,) )] )
 
       if self.chrom is not None:
          # PLINK uses following mapping:
