@@ -810,9 +810,11 @@ class longRangePhase:
       self.famInfo = []
       
       if fadFileName is not None:
+         printerr("Loading %s"%(fadFileName))
          self.loadFAD(fadFileName)
 
       if tpedFileName is not None:
+         printerr("Loading %s"%(tpedFileName))
          self.loadTPED(tpedFileName)
 
       printerr("Setting prior likelihoods")
@@ -959,7 +961,7 @@ class longRangePhase:
       self.alleles = new_alleles[bad_mask]
       self.famInfo.extend(indivs)
       
-      #pdb.set_trace() 
+
 
 
    def loadTPED(self, tpedFileName):
@@ -1110,46 +1112,17 @@ class longRangePhase:
       self.hLike = numpy.empty((self.indivs, self.markers, 4),dtype = self.dataType,
                                order="C")
 
-
+      tic = time.clock()
       printerr("Memory for likelihoods %gMB"%(self.hLike.nbytes*1.0/(2.0**20)))
 
-      logG_part_get = self.logG_part.get
-      for snpID,genos_pairs in enumerate(self.haplos):
-#for snpID,(f,genos) in enumerate(it.izip(self.zeroAF,self.fad["haplos"])):
-          missing = [ 0.0, 0.0, 0.0, 0.0 ]
-
-          #self.hLike[:,snpID,:]=numpy.array([ self.logG.get(int(g),missing) for i,g in enumerate(genos) if i%2==0])
-
-          #genos_pairs = ( genos[i:i+2] for  i in range(0,len(genos),2) )
-#  Start Wed Oct 06 11:31:27 BST 2010
-          # Alternative way of filling the likelihood table
-          #self.hLike[:,snpID,:] = numpy.array([ self.logG_part.get(g,missing) for g in genos_pairs], dtype = self.dataType)
-
-          #genos_pairs=list(genos_pairs)
-          #print list(it.chain(*(self.logG_part.get(g,missing) for g in genos_pairs)))
-
-          self.hLike[:,snpID,:] = numpy.fromiter(it.chain(*(logG_part_get(tuple(g),missing) for g in genos_pairs)),
-                                                 count = len(genos_pairs)*4, dtype = self.dataType).reshape(self.hLike[:,snpID,:].shape)
+      logGp=numpy.zeros((4,4,4),dtype=self.dataType)
+      for k,v in self.logG_part.iteritems():
+         logGp[k[0],k[1],:]=v
+      self.hLike = logGp[self.haplos[:,:,0],self.haplos[:,:,1],:].transpose((1,0,2))
 
 
-#           # Add non uniform prior for the diplotypes.
-
-#           # Maximum minor allele frequency that doesn't result in calls just because of the prior.
-#           maxMAF = 1.0 - numpy.sqrt(options.callThreshold) / ( numpy.sqrt(options.callThreshold) + 1.0)
-#           f = min(f,1-f)
-#           # Prior frequency 
-#           pf = maxMAF * (1-f) + f*(1-maxMAF)
-#           diploPrior = numpy.array([-2*numpy.log(pf), -(numpy.log(pf)+numpy.log(1-pf)),
-#                                     -(numpy.log(pf)+numpy.log(1-pf)), -2*numpy.log(1-pf)], dtype = self.dataType)
-#           diploPrior -= diploPrior.min()
-#           #print diploPrior
-
-#           #print self.hLike[:,snpID,:]
-#           self.hLike[:,snpID,:] += numpy.tile(diploPrior, (self.hLike.shape[0],1))
-# Finished  Wed Oct 06 11:31:32 BST 2010 
-
-
-      
+      toc = time.clock()
+      printerr("Set likelihoods in %gs."%(toc-tic))
       self.hLike = self.hLike.view(ndarray_ADD)
 
 
@@ -1496,7 +1469,7 @@ class longRangePhase:
       elif len(header) == 3:
          gmap = numpy.loadtxt(gmFile, dtype = [ ("bpPos",numpy.int), ("rate",numpy.float), ("cmPos", numpy.float) ] )
       else:
-         raise Exception("Malformatted genetic map file. Need 3-4 columns: chromosome(optional) bp_position recomb_rate centiMorgan_position")
+         raise Exception("Malformatted genetic map file %s. Need 3-4 columns: chromosome(optional) bp_position recomb_rate centiMorgan_position"%(geneticMap))
 
       numpy.diff(gmap["cmPos"])
       map_offset = gmap["rate"][0]*gmap["bpPos"][0]*1e-6
@@ -2534,7 +2507,7 @@ class longRangePhase:
          
          totMeanSqrE+=meanSqrD[0] / len(allocedIBD)
       printerr("Final error: %g"%(totMeanSqrE))
-#      pdb.set_trace()
+
       return totMeanSqrE
 
 
