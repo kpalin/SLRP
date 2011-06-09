@@ -3079,8 +3079,36 @@ class longRangePhase:
 
 
 
+
+   def estimate_max_message_mem(self):
+      "Return the estimate for the maximum memory consumption for the message passing in bytes"
+
+      step_len = min( self.slice_len, self.markers)
+      ibd_bytes = numpy.dtype(self.allocedIBD_dtype).itemsize
+      dtype_bytes = numpy.dtype(self.dataType).itemsize
+
+      max_mem = 0.0
+      for firstBase in range(0, self.markers, step_len):
+         lastBase = firstBase + step_len
+         toAllocIBDindicator =  numpy.logical_and( numpy.logical_and( firstBase<= self.ibd_regions["beginM"], self.ibd_regions["beginM"] < lastBase),
+                                               (self.ibd_regions["endM"] - self.ibd_regions["beginM"] + 1) >= self.minIBDlength)
+
+
+
+
+         toAllocIBD = (self.ibd_regions[x] for x in toAllocIBDindicator.nonzero()[0])
+         overhang = 10
+         nAllocIBD = toAllocIBDindicator.sum()
+         nMarkers = sum(int(x["endM"] - x["beginM"]) + 2 * overhang  for  x in toAllocIBD )
+
+         this_mem = nAllocIBD*ibd_bytes + 2.0 * nMarkers * 4.0 * dtype_bytes
          
-      
+         printerr("Expected memory for messages at slice %s-%s: %g GB"%(firstBase,lastBase, this_mem * 2**(-30)))
+
+         max_mem = max(max_mem,this_mem)
+
+      return max_mem
+       
    def phase(self,iterations=10,intFADbase=None,intIBDbase=None,use_max_product=True):
       "Compute the long range phase over IBD segments in allocedIBD"
 
@@ -3096,6 +3124,10 @@ class longRangePhase:
       step_len = min( self.slice_len, self.markers)
 
       ibd_segment_cache = set()
+
+      pre_mem = resident()
+      max_msg_mem = self.estimate_max_message_mem()
+      printerr("Expected RSS memory requirement above %g GB"%( (pre_mem + max_msg_mem) * 2**-30))
 
       for firstBase in range(0, self.markers, step_len):
          lastBase = firstBase + step_len
