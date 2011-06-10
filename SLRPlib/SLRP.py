@@ -1472,10 +1472,12 @@ class longRangePhase:
       else:
          raise Exception("Malformatted genetic map file %s. Need 3-4 columns: chromosome(optional) bp_position recomb_rate centiMorgan_position"%(geneticMap))
 
+
       numpy.diff(gmap["cmPos"])
       map_offset = gmap["rate"][0]*gmap["bpPos"][0]*1e-6
       way_past_cm = gmap["cmPos"][-1] + map_offset + \
-                    gmap["rate"][-1]*gmap["bpPos"][-1]*1e-6
+                    gmap["rate"][-1]*(self.snpPos[-1] - gmap["bpPos"][-1])*1e-6
+
 
       gmap = gmap[ numpy.diff(gmap["cmPos"]) > 1e-5 ]
       self.snpCMpos = numpy.interp(self.snpPos,
@@ -1484,6 +1486,14 @@ class longRangePhase:
                                                       gmap["cmPos"] + map_offset,
                                                       [ way_past_cm ])))
                                      
+      if self.snpPos.min() < gmap["bpPos"].min() or self.snpPos.max() > gmap["bpPos"].max():
+         gmap_cover_prop = (min(gmap["bpPos"][-1],self.snpPos[-1])-max(gmap["bpPos"][0],self.snpPos[0]))*1.0/(self.snpPos[-1]-self.snpPos[0])
+         printerr("Extrapolating genetic map from region %d-%dbp (%g cM) to %d-%dbp (%g cM)"%(gmap["bpPos"].min(), gmap["bpPos"].max(),
+                                                                                              gmap["cmPos"].max()-gmap["cmPos"].min(),
+                                                                                              self.snpPos.min(), self.snpPos.max(),
+                                                                                              self.snpCMpos[-1] - self.snpCMpos[0]))
+         printerr("Genetic map covers %g%% of the marker span."%(100.0*gmap_cover_prop))
+         
       printerr("Length of chromosome: %d bp, %g cM"%(self.snpPos[-1] - self.snpPos[0]+1,
                                                      self.snpCMpos[-1] - self.snpCMpos[0]))
       assert self.snpPos[-1] - self.snpPos[0]+1 > 0, "Non positive physical chromosome length"
@@ -1720,7 +1730,7 @@ class longRangePhase:
 
    def loadAlleleFrequencies(self,freqFile):
       "Load allele frequency information from the named file"
-      posFreq = numpy.loadtxt(freqFile, dtype = [('pos', '<i8'), ('freq', '<f8'), ("A0","|S1"), ("A1","|S1")] )
+      posFreq = numpy.loadtxt(freqFile, dtype = [('pos', int), ('freq', float), ("A0","|S1"), ("A1","|S1")] )
       assert len(posFreq) == self.markers, "Frequency file format error. There has to be frequencies for exactly the given markers"
       assert ((posFreq["pos"] - self.snpPos)==0).all(), "Frequency file format error. There has to be frequencies for exactly the given markers"
 
@@ -1731,9 +1741,8 @@ class longRangePhase:
 
    def writeAlleleFrequencies(self,freqFile):
       "Write allele frequency information to the named file"
-      frq = numpy.vstack((self.snpPos, self.zeroAF, self.alleles.T)).T
-      #numpy.savetxt(freqFile,frq,fmt="%d\t%g")
-      numpy.savetxt(freqFile,frq,fmt=["%s","%s","%s","%s"], delimiter="\t")
+      frq = numpy.fromiter(it.izip(self.snpPos, self.zeroAF, self.alleles[:,0],self.alleles[:,1]),dtype= [('pos', int), ('freq', float), ("A0","|S1"), ("A1","|S1")] )
+      numpy.savetxt(freqFile,frq,fmt="%d\t%g\t%s\t%s")
       pass
    
    def computeOneIBDnoUpdate(self,indPairs):
