@@ -3159,7 +3159,7 @@ class longRangePhase:
       max_mem = 0.0
       for firstBase in range(0, self.markers, step_len):
          lastBase = firstBase + step_len
-         toAllocIBDindicator =  numpy.logical_and( numpy.logical_and( firstBase<= self.ibd_regions["beginM"], self.ibd_regions["beginM"] < lastBase),
+         toAllocIBDindicator =  numpy.logical_and( numpy.logical_and( firstBase<= self.ibd_regions["endM"], self.ibd_regions["beginM"] < lastBase),
                                                (self.ibd_regions["endM"] - self.ibd_regions["beginM"] + 1) >= self.minIBDlength)
 
 
@@ -3243,7 +3243,16 @@ class longRangePhase:
          #allocedIBD.sort(key = lambda x:(x[2],-x[3]))
          newIBD.sort(order = [ "beginMarker","endMarker"] )  # TODO: Check results!! sort order is different from the list version
 
-         allocedIBD = numpy.hstack( [allocedIBD, newIBD] )
+         #aIBD = allocedIBD
+         old_aIBD_len = len(allocedIBD)
+         nIBD_len = len(newIBD)
+         
+         #allocedIBD = numpy.hstack( [allocedIBD, newIBD] )
+
+         allocedIBD.resize((old_aIBD_len+nIBD_len,))
+         allocedIBD[old_aIBD_len:] = newIBD
+         #assert (aIBD == allocedIBD).all()
+
          newIBD = None
          printerr("RSS after stacking: %g GB"%(resident()*2.0**(-30)))
 
@@ -3260,10 +3269,25 @@ class longRangePhase:
                self.set_workers(1)
             self.iterateOverIBD(allocedIBD,iterations,intermedFAD=intFADbase,intermedIBD=intIBDbase,use_max_product=use_max_product)
          else:
+            # Trying to load balance chunks
+            cum_len = numpy.cumsum(allocedIBD["endMarker"]-allocedIBD["beginMarker"])
+            chunk_size_markers = cum_len[-1]/self.poolSize
+            breaks = numpy.searchsorted(cum_len, numpy.array([chunk_size_markers * i for i in range(1,self.poolSize) ] ) )
+            prev_break = 0
+            chunk_slices = []
+            for next_break in breaks:
+               chunk_slices.append(allocedIBD[prev_break:next_break])
+               prev_break = next_break
+            chunk_slices.append(allocedIBD[prev_break:])
+            printerr("Chunks of plausible IBD regions: "+str(map(len,chunk_slices)))
+            
+                                        
             # Threading
             chunkSize = int( len(allocedIBD) * 1.0 / self.poolSize + 1) 
             handythread.foreach(lambda chunk: self.iterateOverIBD(chunk, iterations, intermedFAD=intFADbase,intermedIBD=intIBDbase),
-                                [allocedIBD[(i*chunkSize):((i+1)*chunkSize)] for i in range(self.poolSize) ], threads = self.poolSize )
+                                chunk_slices,
+#                                [allocedIBD[(i*chunkSize):((i+1)*chunkSize)] for i in range(self.poolSize) ],
+                                threads = self.poolSize )
          ibd_segment_cache.update(self.ibdSegments)
       else:
          pass
