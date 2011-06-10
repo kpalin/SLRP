@@ -68,7 +68,11 @@ def process_args():
 
    parser.add_option("-o", "--outFile", dest="outFile",
                      help="Name of the long range phased FAD output file  [default:%default]",
-                     metavar="FILE",default="SLRP_%d.out"%(os.getpid())
+                     metavar="FILE",default=None #default="SLRP_%d.out"%(os.getpid())
+                     )
+   parser.add_option("-O", "--outVCF", dest="outVCF",
+                     help="Name of the long range phased VCF output file  [default:%default]",
+                     metavar="FILE",default="SLRP_%d.vcf"%(os.getpid())
                      )
    parser.add_option("", "--IMPUTEfile", dest="IMPUTEfile",
                      help="Output the imputed results to FILE in IMPUTE format  [default:%default]",
@@ -450,9 +454,14 @@ def main():
                       use_max_product = options.use_max_product)
 
       if mpi_rank == 0:
-         printerr("Writing output FAD to",options.outFile)
-         rlp.writeFAD(options.outFile, options.out_inferred_genotypes)
-         rlp.writeFAM(addSuffix(options.outFile,".fam"))
+         if options.outFile is not None:
+            printerr("Writing output FAD to",options.outFile)
+            rlp.writeFAD(options.outFile, options.out_inferred_genotypes)
+            rlp.writeFAM(addSuffix(options.outFile,".fam"))
+         if options.outVCF is not None:
+            printerr("Writing output VCF to",options.outVCF)
+            rlp.writeVCF(options.outVCF, options.out_inferred_genotypes)
+
 
          if options.IMPUTEfile is not None:
             rlp.writeIMPUTE(options.IMPUTEfile)

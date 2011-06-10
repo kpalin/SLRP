@@ -25,6 +25,7 @@ import threading
 import signal
 
 import handythread
+from SLRPlib import __version__
 
 try:
    from meminfo import resident
@@ -974,7 +975,7 @@ class longRangePhase:
       #tfamFile = open(tpedFileName+".tfam")
       tfamFile = open(tfamFileName)
 
-      tfam = [ " ".join(x.strip().split()[:2]) for x in tfamFile ]
+      tfam = [ ":".join(x.strip().split()[:2]) for x in tfamFile ]
       self.famInfo.extend(tfam)
       self.indivs = len(self.famInfo)
 
@@ -1721,7 +1722,7 @@ class longRangePhase:
       "Load allele frequency information from the named file"
       posFreq = numpy.loadtxt(freqFile, dtype = [('pos', '<i8'), ('freq', '<f8'), ("A0","|S1"), ("A1","|S1")] )
       assert len(posFreq) == self.markers, "Frequency file format error. There has to be frequencies for exactly the given markers"
-      assert numpy.allclose(posFreq["pos"] - self.snpPos,0), "Frequency file format error. There has to be frequencies for exactly the given markers"
+      assert ((posFreq["pos"] - self.snpPos)==0).all(), "Frequency file format error. There has to be frequencies for exactly the given markers"
 
       load_A = posFreq[["A0","A1"]].view("|S1").reshape((-1,2))
       assert (self.alleles == load_A).all(), "Some allele mappings do not match between the genotype data and the allele frequency file"
@@ -2325,7 +2326,7 @@ class longRangePhase:
       prevMeanSqrE = 1.0
       repeatCount=it.count(0)
       repeat=repeatCount.next()
-
+      
       while  repeat<iterations:
          start_repeat_time=time.time()
          printerr("Repeat %d"%(repeat))
@@ -2539,6 +2540,65 @@ class longRangePhase:
    def setCallThreshold(self,val):
       assert val >= 1.0, "The call threshold must not be less than one."
       self.callThreshold = val
+
+   def writeVCF(self,fname,allow_inferred_genotypes=False):
+      "Write current information (haplotypes, Alleles and frequencies, ..)  to a file in VCF format"
+      import pysam
+      vcf = pysam.VCF()
+      
+      vcf.setheader([("source","SLRP-%s"%(__version__) )])
+      vcf.setsamples(self.famInfo)
+      AFi = pysam.cvcf.FORMAT('AF1',pysam.VCF.NT_NUMBER,1,'Float',"MAP estimate of the site allele frequency of the first ALT allele",'.')
+      GTf = pysam.cvcf.FORMAT('GT',pysam.VCF.NT_NUMBER,1,'String','Genotype','.')
+      vcf.setformat({GTf.id:GTf})
+      vcf.setinfo({AFi.id:AFi})
+
+
+      phases = self.callPhases(allow_inferred_genotypes)
+
+
+      def vcfGenerator(phases,poses,alleles,AF,samples):
+         from itertools import izip
+         d  = { "chrom":self.chrom,
+                "id":".",
+                "qual":".",
+                "filter":None,
+                "format":["GT"] }
+         if d["chrom"] is None:
+            d["chrom"] = "Unkn"
+            
+         phase2str = {(0,0):["0|0"],
+                      (0,1):["0|1"],
+                      (1,0):["1|0"],
+                      (1,1):["1|1"],
+                      (2,2):["0/1"],
+                      (3,3):["./."],
+                      (3,1):[".|1"],
+                      (1,3):["1|."],
+                      (3,0):[".|0"],
+                      (0,3):["0|."]}
+         phase_arr = numpy.empty((4,4),dtype=numpy.object)
+         for k,v in phase2str.iteritems(): phase_arr[k]=v
+
+
+         for p,A,f,h in izip(poses,alleles,AF,phases):
+               d["pos"] = p
+               d["info"] = {"AF1":[1.0-f] }
+               d["ref"] = A[0]
+               d["alt"] = [ A[1] ]
+               d.update((s,dict(GT=phase_arr[g[0],g[1]] )) for s,g in izip(samples,h))
+               yield d
+
+      phase_strm = vcfGenerator(phases, self.snpPos, self.alleles, self.zeroAF, self.famInfo)
+
+      printerr("Openning "+fname)
+      outstrm = open(fname,"w")
+      vcf.write(outstrm, phase_strm)
+      printerr("Closing")
+      outstrm.close()
+      
+
+
       
    def writeFAD(self,fname,allow_inferred_genotypes=False):
       "Write current haplotypes to file fname in FAD format"
@@ -2618,9 +2678,11 @@ class longRangePhase:
 
       return phases
 
-   
-   def writeFADstrm(self,outf,allow_inferred_genotypes=False):
-      "Call haplotypes from current likelihoods and write to file fname in FAD format"
+
+
+   def callPhases(self,allow_inferred_genotypes=False):
+      "Return an array of called phases"
+      
       idx2phase = numpy.array([(0, 0), (1, 0), (0, 1), (1, 1), (2, 2)], dtype = numpy.int8)
 
       # Call most likely phase:
@@ -2656,6 +2718,13 @@ class longRangePhase:
       if self.callThreshold > 1.0:
          phases = self.thresholdCalls(phases)
 
+      return phases
+         
+   def writeFADstrm(self,outf,allow_inferred_genotypes=False):
+      "Call haplotypes from current likelihoods and write to file fname in FAD format"
+
+      phases = self.callPhases(allow_inferred_genotypes)
+      
       outf.writelines("%d\t%s\n"%(pos,hl.tostring()) for pos,hl in zip(self.snpPos,phases+ord('0'))  )
 
 
