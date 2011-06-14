@@ -16,13 +16,14 @@ from __future__ import with_statement
 
 
 
-
+import gc
 import sys
 import random
 import time
 import pdb
 import threading
 import signal
+#gc.set_debug(gc.DEBUG_LEAK)
 
 import handythread
 from SLRPlib import __version__
@@ -178,13 +179,13 @@ except ImportError,e:
 class ThreadTagOutput(object):
 
    def __init__(self, f):
-      self.decor = "[%s %s]"
+      self.decor = "[%s %s %.3gGB]"
       self.f = f
       self.l = threading.Lock()
 
    def __call__(self,*x):
       self.l.acquire()
-      sys.stderr.write(self.decor%(threading.currentThread(),time.asctime()))
+      sys.stderr.write(self.decor%(threading.currentThread().name,time.asctime(),resident()*(2.0**-30)))
       self.f(*x)
       self.l.release()
 
@@ -2300,6 +2301,8 @@ class longRangePhase:
       "Run one iteration of message passing over messages, preallocated in allocedIBD"
       startTime = time.time()
       totMeanSqrE = self.c_ext.processAllocedIBD(allocedIBD,self.hLike, self.CPT,self.dampF,self.firstCP2P,MAPestimate)
+      _unreach =gc.collect()
+      if _unreach > 0: printerr("Unreachable objects: %d"%(_unreach))
       doneTime = time.time()
       printerr("Repeat took %g minutes"%((doneTime-startTime)/60.0))
       
@@ -2567,7 +2570,7 @@ class longRangePhase:
 
 
       def vcfGenerator(phases,poses,alleles,AF,samples):
-         from itertools import izip
+
          d  = { "chrom":self.chrom,
                 "id":".",
                 "qual":".",
@@ -2590,12 +2593,12 @@ class longRangePhase:
          for k,v in phase2str.iteritems(): phase_arr[k]=v
 
 
-         for p,A,f,h in izip(poses,alleles,AF,phases):
+         for p,A,f,h in it.izip(poses,alleles,AF,phases):
                d["pos"] = p
                d["info"] = {"AF1":[1.0-f] }
                d["ref"] = A[0]
                d["alt"] = [ A[1] ]
-               d.update((s,dict(GT=phase_arr[g[0],g[1]] )) for s,g in izip(samples,h))
+               d.update((s,dict(GT=phase_arr[g[0],g[1]] )) for s,g in it.izip(samples,h))
                yield d
 
       phase_strm = vcfGenerator(phases, self.snpPos, self.alleles, self.zeroAF, self.famInfo)
@@ -2720,7 +2723,9 @@ class longRangePhase:
 
 
 
-      phases = numpy.array(idx2phase[posCalls]).transpose((1,0,2))
+      phases_old = numpy.array(idx2phase[posCalls]).transpose((1,0,2))
+      phases = idx2phase[posCalls].transpose((1,0,2))
+      assert (phases_old==phases).all()
       phases.shape = (self.markers, -1, 2) # = (markers,indivs,2)
 
 
@@ -2734,7 +2739,7 @@ class longRangePhase:
 
       phases = self.callPhases(allow_inferred_genotypes)
       
-      outf.writelines("%d\t%s\n"%(pos,hl.tostring()) for pos,hl in zip(self.snpPos,phases+ord('0'))  )
+      outf.writelines("%d\t%s\n"%(pos,hl.tostring()) for pos,hl in it.izip(self.snpPos,phases+ord('0'))  )
 
 
 
@@ -2899,6 +2904,8 @@ class longRangePhase:
       if self.myRank > 0:
          self.phase(iterations)
          self.hLike.Finished()
+         _unreach =gc.collect()
+         if _unreach > 0: printerr("Unreachable objects: %d"%(_unreach))
       else:
          def mpiExceptHook(err_type, value, tb):
             sys.__excepthook__(err_type, value, tb)
@@ -3216,6 +3223,8 @@ class longRangePhase:
          allocedIBD["lastMarkerFilled"] = numpy.minimum(lastBase, allocedIBD["endMarker"])
          allocedIBD["prevMeanSqrDiff"] = 1e99
 
+         _unreach =gc.collect()
+         if _unreach > 0: printerr("Unreachable objects: %d"%(_unreach))
 
          if lastBase < self.markers:
             printerr("RSS after passing wave: %g GB"%(resident()*2.0**(-30)))
@@ -3230,8 +3239,11 @@ class longRangePhase:
                                                (self.ibd_regions["endM"] - self.ibd_regions["beginM"] + 1) >= self.minIBDlength)
 
 
-         printerr("Future allocation stats:", self.ibd_regions.shape, len(allocedIBD), self.minIBDlength,sum(toAllocIBDindicator))
+         printerr("Future allocation stats: #ibd regions: %d  #allocated IBD: %d  #to allocate ibd: %d"%(self.ibd_regions.shape[0], len(allocedIBD),
+                                                                                                         sum(toAllocIBDindicator)))
 
+         _unreach =gc.collect()
+         if _unreach > 0: printerr("Unreachable objects: %d"%(_unreach))
 
          toAllocIBD = (self.ibd_regions[x] for x in toAllocIBDindicator.nonzero()[0])
          overhang = 10
@@ -3245,8 +3257,22 @@ class longRangePhase:
                                     min(self.markers-1, int(x["endM"]) + overhang ) ) \
                                    for  x in toAllocIBD ] ,
                                   dtype = self.allocedIBD_dtype)
+
+#          altIBD = numpy.fromiter( ( (int(x["ind1"] - x["ind1"] % 2),
+#                                     int(x["ind2"] - x["ind2"] % 2), 
+#                                     int(max(0, int(x["beginM"]) - overhang)),
+#                                     int(min(self.markers-1, int(x["endM"]) + overhang, lastBase)), 
+#                                     numpy.zeros((min(self.markers-1,x["endM"] + overhang) - max(0, x["beginM"] - overhang) + 1, 4), dtype = self.dataType),
+#                                     numpy.zeros((min(self.markers-1,x["endM"] + overhang) - max(0, x["beginM"] - overhang) + 1, 4), dtype = self.dataType),
+#                                     numpy.array([1e99], dtype = self.dataType),
+#                                     min(self.markers-1, int(x["endM"]) + overhang ) ) \
+#                                    for  x in toAllocIBD ) , count = toAllocIBDindicator.sum(),
+#                                   dtype = self.allocedIBD_dtype)
+#          pdb.set_trace()
          printerr("RSS after allocations: %g GB"%(resident()*2.0**(-30)))
 
+         _unreach =gc.collect()
+         if _unreach > 0: printerr("Unreachable objects: %d"%(_unreach))
 
 
          #allocedIBD.sort(key = lambda x:(x[2],-x[3]))
@@ -3263,7 +3289,12 @@ class longRangePhase:
          #assert (aIBD == allocedIBD).all()
 
          newIBD = None
+         _unreach =gc.collect()
+         if _unreach > 0: printerr("Unreachable objects: %d"%(_unreach))
+
          printerr("RSS after stacking: %g GB"%(resident()*2.0**(-30)))
+         _unreach =gc.collect()
+         if _unreach > 0: printerr("Unreachable objects: %d"%(_unreach))
 
          if len(allocedIBD) == 0:
             # Skip to next slice if there are no IBD segments to analyse

@@ -1,4 +1,19 @@
 
+def getsizeof(obj):
+   "Return memory size of the object (including numpy objects)"
+   import sys
+   s = sys.getsizeof(obj)
+   try:
+      s += obj.nbytes
+   except Exception:
+      pass
+   return s
+
+def get_objects_by_size():
+   "Return an iterator of all GC tracked objects sorted by their memory consumption"
+   import gc
+   return sorted(((getsizeof(o),o) for o in gc.get_objects()), key=lambda x:x[0], reverse=True)
+
 def addSuffix(base,suffix):
    "Append a suffix to the base such that .gz ending is kept last"
    if base.endswith(".gz"):
