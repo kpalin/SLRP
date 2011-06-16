@@ -707,7 +707,7 @@ class longRangePhase:
       self.set_min_ibd_length()
       
       self.firstPhase=True
-      self.ibdSegments=[]
+      self.ibdSegments=set()
       
 
       if self.dataType==numpy.float64:
@@ -1008,6 +1008,7 @@ class longRangePhase:
       tpedMarkers = self.tped.shape[0]
 
       tpedAlleles = numpy.fromiter((numpy.intersect1d(x,"ACGT") for x in self.tped["haplos"]),dtype=[('zero',"|S1"),('one',"|S1")])
+      tpedAlleles[tpedAlleles["one"]==""] = "."
       self.alleles = tpedAlleles.view("|S1")
       self.alleles.shape = (tpedMarkers, 2)
       numAlleles = tpedAlleles.view("int8")
@@ -2421,7 +2422,6 @@ class longRangePhase:
 
 
 
-         self.ibdSegments=[]
          #self.ibd_regions = None
          printerr("Repeat %d"%(repeat))
          totMeanSqrE = 0.0        
@@ -2512,7 +2512,8 @@ class longRangePhase:
 
          if (ca2h1.shape[0] == (endM-beginM+1) ):
             ind1, ind2 = int(ind1), int(ind2)
-            self.ibdSegments.extend((ind1+h1,ind2+h2,startM,stopM) \
+#            self.ibdSegments.extend((ind1+h1,ind2+h2,startM,stopM) \
+            self.ibdSegments.update((ind1+h1,ind2+h2,startM,stopM) \
                                     for  h1,h2,startM,stopM in self.callCurIBD(beginM,endM))
 
 
@@ -3208,12 +3209,13 @@ class longRangePhase:
 
       step_len = min( self.slice_len, self.markers)
 
-      ibd_segment_cache = set()
+#      ibd_segment_cache = set()
 
       pre_mem = resident()
       max_msg_mem = self.estimate_max_message_mem()
       printerr("Expected RSS memory requirement above %g GB"%( (pre_mem + max_msg_mem) * 2**-30))
 
+      self.ibdSegments = set()
       for firstBase in range(0, self.markers, step_len):
          lastBase = firstBase + step_len
          #allocedIBD = []
@@ -3328,12 +3330,12 @@ class longRangePhase:
                                 chunk_slices,
 #                                [allocedIBD[(i*chunkSize):((i+1)*chunkSize)] for i in range(self.poolSize) ],
                                 threads = self.poolSize )
-         ibd_segment_cache.update(self.ibdSegments)
+         #ibd_segment_cache.update(self.ibdSegments)
       else:
          pass
       #self.ibdSegments = list(ibd_segment_cache)
-      self.ibdSegments = None
-      self.ibdSegments = ibd_segment_cache
+      #self.ibdSegments = None
+      #self.ibdSegments = ibd_segment_cache
 
 
 
