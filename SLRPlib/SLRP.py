@@ -707,7 +707,8 @@ class longRangePhase:
       self.set_min_ibd_length()
       
       self.firstPhase=True
-      self.ibdSegments=set()
+      #self.ibdSegments=set()
+      self.ibdSegments_lock = threading.Lock()
       
 
       if self.dataType==numpy.float64:
@@ -2307,6 +2308,7 @@ class longRangePhase:
       if _unreach > 0: printerr("Unreachable objects: %d"%(_unreach))
       doneTime = time.time()
       printerr("Repeat took %g minutes"%((doneTime-startTime)/60.0))
+      printerr("#secs #segments #sites %d %d %d"%((doneTime-startTime), len(allocedIBD), (allocedIBD["lastMarkerFilled"] - allocedIBD["beginMarker"]).sum()))
 
       return totMeanSqrE
 
@@ -2395,7 +2397,7 @@ class longRangePhase:
       
    def iterateOverIBDmax(self,allocedIBD,iterations,intermedFAD=None,intermedIBD=None,use_gold_standard=False):
       "Do the phasing proper, with the min-sum algorithm, trying to find most likely phase"
-      
+
       totMeanSqrE=prevBestMeanSqrE=2e9
 
       repeatCount=it.count(0)
@@ -2407,6 +2409,10 @@ class longRangePhase:
 
       firstIteration = True
       firstMeanSqrE, prevMeanSqrE = None, 1.0
+
+      from array import array
+
+      my_ibdSegments = array("l") # long
 
       __dampF = self.dampF
       #self.setDamping(0.0)
@@ -2514,15 +2520,22 @@ class longRangePhase:
 
          if (ca2h1.shape[0] == (endM-beginM+1) ):
             ind1, ind2 = int(ind1), int(ind2)
-#            self.ibdSegments.extend((ind1+h1,ind2+h2,startM,stopM) \
-            self.ibdSegments.update((ind1+h1,ind2+h2,startM,stopM) \
-                                    for  h1,h2,startM,stopM in self.callCurIBD(beginM,endM))
-
+            my_ibdSegments.extend( it.chain.from_iterable( (ind1+h1,ind2+h2,startM,stopM) for  h1,h2,startM,stopM in self.callCurIBD(beginM,endM) ) )
+            #self.ibdSegments.update((ind1+h1,ind2+h2,startM,stopM) \
+            #                        for  h1,h2,startM,stopM in self.callCurIBD(beginM,endM))
 
             
          
          totMeanSqrE+=meanSqrD[0] / len(allocedIBD)
       printerr("Final error: %g"%(totMeanSqrE))
+      if len(my_ibdSegments) > 0 :
+         my_ibdSegments = numpy.array(my_ibdSegments,dtype=int).reshape((-1,4) )
+         self.ibdSegments_lock.acquire()
+         self.ibdSegments = numpy.vstack((self.ibdSegments,
+                                          my_ibdSegments) )
+         self.ibdSegments_lock.release()
+
+
 
       return totMeanSqrE
 
@@ -3263,21 +3276,27 @@ class longRangePhase:
       pre_mem = resident()
       max_msg_mem = self.estimate_max_message_mem()
       printerr("Expected RSS memory requirement above %g GB"%( (pre_mem + max_msg_mem) * 2**-30))
-      if len(allocedIBD)>0: printerr(sys.getrefcount(allocedIBD["p2h1"][0]), "should be 2 at line %d."%(tools.lineno()))
 
-      self.ibdSegments = set()
+      #self.ibdSegments = set()
+      self.ibdSegments = numpy.empty((0,4), dtype = int )
+
       for firstBase in range(0, self.markers, step_len):
          lastBase = firstBase + step_len
          #allocedIBD = []
          printerr("RSS before allocations: %g GB"%(resident()*2.0**(-30)))
 
+         #if len(allocedIBD)>0: printerr(sys.getrefcount(allocedIBD["p2h1"][0]), "should be 2 at line %d."%(tools.lineno()))
 
-         if len(allocedIBD)>0: printerr(sys.getrefcount(allocedIBD["p2h1"][0]), "should be 2 at line %d."%(tools.lineno()))
          if len(allocedIBD) > 0:
-            allocedIBD = allocedIBD[ allocedIBD["endMarker"] > firstBase ].copy()
+            _selector = allocedIBD["endMarker"] > firstBase
+            _tmp = allocedIBD[ _selector ]
+            alloced = None
+            allocedIBD = _tmp.copy()
+            _tmp = None
+            #allocedIBD = allocedIBD[ allocedIBD["endMarker"] > firstBase ].copy()
             allocedIBD["lastMarkerFilled"] = numpy.minimum(lastBase, allocedIBD["endMarker"])
             allocedIBD["prevMeanSqrDiff"] = 1e99
-         if len(allocedIBD)>0: printerr(sys.getrefcount(allocedIBD["p2h1"][0]), "should be 2 at line %d."%(tools.lineno()))
+            gc.collect()
 
 
          _unreach =gc.collect()
@@ -3299,7 +3318,6 @@ class longRangePhase:
 
          printerr("Future allocation stats: #ibd regions: %d  #allocated IBD: %d  #to allocate ibd: %d"%(self.ibd_regions.shape[0], len(allocedIBD),
                                                                                                          sum(toAllocIBDindicator)))
-         if len(allocedIBD)>0: printerr(sys.getrefcount(allocedIBD["p2h1"][0]), "should be 2 at line %d."%(tools.lineno()))
 
 
          _unreach =gc.collect()
@@ -3343,18 +3361,9 @@ class longRangePhase:
          nIBD_len = len(newIBD)
          
          #allocedIBD = numpy.hstack( [allocedIBD, newIBD] )
-         if old_aIBD_len > 0 :
-            printerr(sys.getrefcount(allocedIBD["p2h1"][old_aIBD_len-1]), "should be 2.")
          allocedIBD.resize((old_aIBD_len+nIBD_len,))
          allocedIBD[old_aIBD_len:] = newIBD
          newIBD = None
-
-
-         #assert (aIBD == allocedIBD).all()
-         if old_aIBD_len > 0 :
-            printerr("Same with",sys.getrefcount(allocedIBD["p2h1"][old_aIBD_len]))
-
-         printerr(sys.getrefcount(allocedIBD["p2h1"][0]), "should be 2 at line %d."%(tools.lineno()))
 
 
          _unreach =gc.collect()
@@ -3378,7 +3387,7 @@ class longRangePhase:
             self.iterateOverIBD(allocedIBD,iterations,intermedFAD=intFADbase,intermedIBD=intIBDbase,use_max_product=use_max_product)
          else:
             # Trying to load balance chunks
-            cum_len = numpy.cumsum(allocedIBD["endMarker"]-allocedIBD["beginMarker"] + 1000)  ## added constant is for load balancing.
+            cum_len = numpy.cumsum(allocedIBD["lastMarkerFilled"]-allocedIBD["beginMarker"] ) 
             chunk_count = self.poolSize
 
             chunk_size_markers = cum_len[-1] / chunk_count
@@ -3391,7 +3400,7 @@ class longRangePhase:
             chunk_slices.append(allocedIBD[prev_break:])
             printerr("Chunks of plausible IBD regions: "+str(map(len,chunk_slices)))
             
-            printerr(sys.getrefcount(allocedIBD["p2h1"][0]), "should be 2 at line %d."%(tools.lineno()))
+
 
                                         
             # Threading
@@ -3401,7 +3410,7 @@ class longRangePhase:
                                 chunk_slices,
 #                                [allocedIBD[(i*chunkSize):((i+1)*chunkSize)] for i in range(self.poolSize) ],
                                 threads = self.poolSize )
-            printerr(sys.getrefcount(allocedIBD["p2h1"][0]), "should be 2 at line %d."%(tools.lineno()))
+            chunk_slices = None
          #ibd_segment_cache.update(self.ibdSegments)
       else:
          pass
