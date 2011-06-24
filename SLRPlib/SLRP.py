@@ -707,7 +707,7 @@ class longRangePhase:
       self.set_min_ibd_length()
       
       self.firstPhase=True
-      #self.ibdSegments=set()
+      self.ibdSegments=set()
       self.ibdSegments_lock = threading.Lock()
       
 
@@ -1031,14 +1031,16 @@ class longRangePhase:
       assert self.haplos.var(axis=2).max()==0.0
 
       self.markers = tpedMarkers
-      self.snpPos = self.tped["bpPos"]
+      self.snpPos = self.tped["bpPos"].copy()
       if self.tped["cmPos"].var() == 0:
          self.snpCMpos =  self.snpPos * self.__mean_recomb_rate
       else:
-         self.snpCMpos = self.tped["cmPos"]
+         self.snpCMpos = self.tped["cmPos"].copy()
 
       assert 0<= self.haplos.min() < self.haplos.max() <= 3, "Funny allele values for haplotypes"
-      
+
+      # Important to save memory
+      self.tped = None
             
    def loadFAD(self, fadFileName):
       "Load the input file in FAD format"
@@ -2304,6 +2306,7 @@ class longRangePhase:
       "Run one iteration of message passing over messages, preallocated in allocedIBD"
       startTime = time.time()
       totMeanSqrE = self.c_ext.processAllocedIBD(allocedIBD,self.hLike, self.CPT,self.dampF,self.firstCP2P,MAPestimate)
+      #totMeanSqrE = 0.0
       _unreach =gc.collect()
       if _unreach > 0: printerr("Unreachable objects: %d"%(_unreach))
       doneTime = time.time()
@@ -3289,6 +3292,17 @@ class longRangePhase:
 
          if len(allocedIBD) > 0:
             _selector = allocedIBD["endMarker"] > firstBase
+            for o in allocedIBD[ _selector == False ]:  # Explicitly delete objects from object array
+               od = o["p2h1"]
+               o["p2h1"] = None
+               del(od)
+               od = o["p2h2"]
+               o["p2h2"] = None
+               del(od)
+               #od = o["prevMeanSqrDiff"]
+               #o["prevMeanSqrDiff"] = None
+               #del(od)
+               
             _tmp = allocedIBD[ _selector ]
             alloced = None
             allocedIBD = _tmp.copy()
@@ -3336,6 +3350,7 @@ class longRangePhase:
                                    for  x in toAllocIBD ] ,
                                   dtype = self.allocedIBD_dtype)
 
+
 #          altIBD = numpy.fromiter( ( (int(x["ind1"] - x["ind1"] % 2),
 #                                     int(x["ind2"] - x["ind2"] % 2), 
 #                                     int(max(0, int(x["beginM"]) - overhang)),
@@ -3364,7 +3379,6 @@ class longRangePhase:
          allocedIBD.resize((old_aIBD_len+nIBD_len,))
          allocedIBD[old_aIBD_len:] = newIBD
          newIBD = None
-
 
          _unreach =gc.collect()
          if _unreach > 0: printerr("Unreachable objects: %d"%(_unreach))
