@@ -23,9 +23,9 @@ tools.setup_post_mortem()
 
 import sys
 
-from SLRPlib import SLRP
 from SLRPlib.tools import printerr,addSuffix
 
+from SLRPlib import __version__
 
 
 
@@ -51,186 +51,225 @@ def writeOptions(opts,outstrm=sys.stdout,outFmt="%(optName)s: %(optValue)s\n"):
             
 def process_args():
    import os
-   parser = optparse.OptionParser()
+   parser = optparse.OptionParser(version="%prog "+__version__,
+                                  description="Systematic Long Range Phasing for phasing and imputing genotypes from "
+                                  "isolated founder populations or other populations where each individual has at "
+                                  "least one other individual sharing each of his/her chromosomes.")
 
-   parser.add_option("-f", "--fadFile", dest="fadFile",
-                     help="Name of the genotype file in FAD format.  REQUIRED  [default:%default]",
+   input_opts = optparse.OptionGroup(parser, "Input options",
+                                     "Options defining files defining the input. "
+                                     "All options will take gzip compressed files")
+
+   input_opts.add_option("-f", "--fadFile", dest="fadFile",
+                     help="Name of the genotype file in FAD format.  [default:%default]",
                      metavar="FILE"#,default="Kuusamo_370K_genotypes.hapMapIntersect.chr23.fad"
                      )
-   parser.add_option("-v", "--vcfFile", dest="vcfFile",
+   input_opts.add_option("-v", "--vcfFile", dest="vcfFile",
                      help="Name of the VCF file with genotypes included.  [default:%default]",
                      metavar="FILE"#,default="Kuusamo_370K_genotypes.hapMapIntersect.chr23.fad"
                      )
-   parser.add_option("-t", "--tpedFile", dest="tpedFile",
+   input_opts.add_option("-t", "--tpedFile", dest="tpedFile",
                      help="Name of the genotype file in tped fromat with genotypes coded as A,C,G,T.  [default:%default]",
                      metavar="FILE"#,default="Kuusamo_370K_genotypes.hapMapIntersect.chr23.fad"
                      )
 
-   parser.add_option("-o", "--outFile", dest="outFile",
-                     help="Name of the long range phased FAD output file  [default:%default]",
+   input_opts.add_option("-C", "--chrom", dest="chromosome",
+                         help="Use this chromosome (for tped input, this must be 1-22,X,Y,XY or MT)  [default:%default]",
+                         default=None,metavar="CHROM"
+                         )
+
+
+   input_opts.add_option("-m", "--geneticMap", dest="geneticMap",
+                     help="Input file with the genetic map in hapmap format  [default:%default]",
+                     metavar="FILE",default=None
+                     )
+
+   input_opts.add_option("", "--loadLikelihoods", dest="loadLikelihoods",
+                     help="Load initial likelihoods from a file (Probably a quite insensible thing to do) [default:%default]",
+                     metavar="FILE",default=None
+                     )
+
+   input_opts.add_option("-i", "--ibdFile", dest="ibdFile",
+                     help="Name of the input IBD file  [default:%default]",
+                     metavar="FILE",default=None
+                     )
+   
+   input_opts.add_option("-l", "--scoreLim", dest="scoreLimit",type="float",
+                     help="Minimum score above which to use the IBD matches loaded from a file [default:%default]", metavar="NUM",default=0.0)
+
+   parser.add_option_group(input_opts)
+
+
+   output_opts = optparse.OptionGroup(parser, "Output options",
+                                     "Options defining files to store the output. "
+                                     "Most options will gzip compress files with .gz ending")
+
+   
+   
+
+   output_opts.add_option("-o", "--outFile", dest="outFile",
+                     help="Name of the long range phased FAD output file. Depreciated for difficulties of allele coding. Recomend using --freq with this  [default:%default]",
                      metavar="FILE",default=None #default="SLRP_%d.out"%(os.getpid())
                      )
-   parser.add_option("-O", "--outVCF", dest="outVCF",
+   output_opts.add_option("-O", "--outVCF", dest="outVCF",
                      help="Name of the long range phased VCF output file  [default:%default]",
                      metavar="FILE",default="SLRP_%d.vcf"%(os.getpid())
                      )
-   parser.add_option("", "--IMPUTEfile", dest="IMPUTEfile",
+   output_opts.add_option("", "--IMPUTEfile", dest="IMPUTEfile",
                      help="Output the imputed results to FILE in IMPUTE format  [default:%default]",
                      default=None,
                      metavar="FILE"
                      )
 
-   parser.add_option("-C", "--chrom", dest="chromosome",
-                     help="Use this chromosome (for tped input, this must be 1-22,X,Y,XY or MT)  [default:%default]",
-                     default=None,metavar="CHROM"
-                     )
 
-
-
-
-   parser.add_option("-m", "--geneticMap", dest="geneticMap",
-                     help="Input file with the genetic map in hapmap format  [default:%default]",
-                     metavar="FILE",default=None
-                     )
-
-   parser.add_option("-S", "--ibdSegCalls", dest="ibdSegmentCalls",metavar="FILE",
+   output_opts.add_option("-S", "--ibdSegCalls", dest="ibdSegmentCalls",metavar="FILE",
                      help="Output IBD segments between the indivdiduals to FILE  [default:%default]",
                      default=None
                      )
 
-   parser.add_option("-Q", "--outQualities", dest="outQualFile",metavar="FILE",
+   output_opts.add_option("-Q", "--outQualities", dest="outQualFile",metavar="FILE",
                      help="Output quality scores for each site. The scores are negative base 10 log posterior probability ratios between the two phasings. (Makes no sense for homs)  [default:%default]",
                      default=None
                      )
-   parser.add_option("-T", "--CallThreshold", dest="callThreshold",metavar="NUM",
-                     help="Minimum fold difference in posterior probability of two most probable phases to be called.  [default:%default]",
-                     default=2.0,type="float"
-                     )
 
-
-   parser.add_option("-c", "--ibdCover", dest="ibdCover",
+   output_opts.add_option("-c", "--ibdCover", dest="ibdCover",
                      help="Output the number of individuals sharing a trackt IBD.   [default:%default]",
                      metavar="FILE",default=None
                      )
 
-   parser.add_option("-R", "--freq", dest="freqFile",
+   output_opts.add_option("-R", "--freq", dest="freqFile",
                      help="File to read the allele frequencies from. If the file doesn't exits, the alele frequency estimates are written there   [default:%default]",
                      metavar="FILE",default=None
                      )
 
-   
-   parser.add_option("-I", "--iterations", dest="iterations",type="int",
-                     help="Maximum number of iterations to run the message passing. Also end if no improvement over three loops [default:%default]",
-                     metavar="NUM",default=30)
-
-   parser.add_option("-d", "--damping", dest="dampF",type="float",
-                     help="Damping factor for message updates  [default:%default]", metavar="NUM",default=0.75)
-
-
-   parser.add_option("", "--ExpectedIBD", dest="ExpectedIBD",type="float",
-                     help="Expected length of an IBD segment (in centiMorgans) [default:%default]",
-                     metavar="NUM",default=10.0)
-   parser.add_option("", "--ExpectedIBS", dest="ExpectedIBS",type="float",
-                     help="Expected length of an non IBD IBS segment (in centiMorgans) [default:%default]",
-                     metavar="NUM",default=1.0)
-
-   parser.add_option("-p", "--prob_ibd", dest="prob_ibd",type="float",
-                     help="Probability of two haplotypes in the population to match  [default:%default]",
-                     metavar="NUM",default=None) #default=0.01)
-   
-   parser.add_option("", "--IBDtransLimit", dest="IBDtransLimit",type="float",
-                     help="Upper limit for probability of noIBD to IBD transition between two markers.  Default taken from population probabililties. [default: 4 * prob_ibd]", metavar="NUM",default=None )
-
-
-
-   parser.add_option("", "--minIBDlength", dest="minIBDlength",type="int",
-                     help="Hard lower limit for length of IBD segment in markers. This should speed up computation by disregarding uninformative IBS segments. [default: %default]",
-                     metavar="NUM",default=10 )
-
-   parser.add_option("", "--IBDcoverLimit", dest="ibdCoverLimit",type="int",
-                     help="Soft lower limit for number of IBD sharing. Only do message passing on the longest NUM segments covering a locus. The selection is greedy, hence there might be more than minimum number of segments used. Non positive value turn off this limit. [default: %default]", metavar="NUM",default=-1 )
-
-
-   parser.add_option("", "--use_sum_product", dest="use_max_product",action="store_false",
-                     help="Use sum-product (marginal posteriors) instead max-product (maximum a posteriori) algorithm.",
-                     default=True
-                     )
-
-
-
-   parser.add_option("-e", "--genotypingErrRate", dest="errP",type="float",
-                     help="Estimated genotyping error rate  [default:%default]", metavar="NUM",default=1e-3)
-
-
-   parser.add_option("-n", "--procs", dest="numProcs",type="int",
-                     help="Number of processors to use in parallel  [default:%default]", metavar="NUM",default=1)
-
-
-   parser.add_option("", "--seed", dest="seed",type="int",
-                     help="Seed for random number generator  [default:%default]", metavar="NUM",default=None)
-
-   parser.add_option("", "--slice_length", dest="slice_length",type="int",
-                     help="Length of alignment slice in markers (to save memory)  [default:%default]", metavar="NUM",default=-1)
-
-
-   parser.add_option("-i", "--ibdFile", dest="ibdFile",
-                     help="Name of the input IBD file  [default:%default]",
-                     metavar="FILE",default=None
-                     )
-   
-   parser.add_option("-l", "--scoreLim", dest="scoreLimit",type="float",
-                     help="Minimum score above which to use the IBD matches loaded from a file [default:%default]", metavar="NUM",default=0.0)
-
-
-   parser.add_option("-F", "--fastPreProc", dest="fastPreProc",action="store_true",
-                     help="Do pre-processing (putative IBD segment finding) with fast sweepline method, which disregards prior phase information and IBD-noIBD transition probabilities  [default:%default]",
-                     default=False
-                     )
-
-   parser.add_option("", "--float", dest="useFloat32",action="store_true",
-                     help="Use floats, instead of doubles. Saves half the memory but might affect numerical precision and stability.  [default:%default]",
-                     default=False
-                     )
-
-   parser.add_option("", "--outputInferredGenotypes", dest="out_inferred_genotypes",action="store_true",
-                     help="Output haplotypes that might have different genotypes from input. These might be more accurate than called from the genotyping assay.  [default:%default]",
-                     default=False
-                     )
-
-
-
-   parser.add_option("-L", "--likeFile", dest="likeFile",
+   output_opts.add_option("-L", "--likeFile", dest="likeFile",
                      help="Name of the file for final MAP values as negative natural logarithm  [default:%default]",
                      metavar="FILE",default=None
                      )
 
-   parser.add_option("", "--loadLikelihoods", dest="loadLikelihoods",
-                     help="Load initial likelihoods from a file (Probably a quite insensible thing to do) [default:%default]",
-                     metavar="FILE",default=None
+
+   parser.add_option_group(output_opts)
+
+
+   param_opts = optparse.OptionGroup(parser, "Model parameter options",
+                                     "Options specifying the model parameters that have effect on the results.")
+
+
+   param_opts.add_option("", "--ExpectedIBS", dest="ExpectedIBS",type="float",
+                     help="Expected length of an non IBD IBS segment (in centiMorgans) [default:%default]",
+                     metavar="NUM",default=1.0)
+   param_opts.add_option("", "--ExpectedIBD", dest="ExpectedIBD",type="float",
+                     help="Expected length of an IBD segment (in centiMorgans) [default:%default]",
+                     metavar="NUM",default=10.0)
+
+   param_opts.add_option("-p", "--prob_ibd", dest="prob_ibd",type="float",
+                     help="Probability of two haplotypes in the population to match  [default:%default]",
+                     metavar="NUM",default=None) #default=0.01)
+   
+   param_opts.add_option("", "--IBDtransLimit", dest="IBDtransLimit",type="float",
+                     help="Upper limit for probability of noIBD to IBD transition between two markers.  Default taken from population probabililties. [default: 4 * prob_ibd]", metavar="NUM",default=None )
+
+   param_opts.add_option("-T", "--CallThreshold", dest="callThreshold",metavar="NUM",
+                     help="Minimum fold difference in posterior probability of two most probable phases to be called.  [default:%default]",
+                     default=2.0,type="float"
                      )
 
+   param_opts.add_option("-e", "--genotypingErrRate", dest="errP",type="float",
+                     help="Estimated genotyping error rate  [default:%default]", metavar="NUM",default=1e-3)
 
-
-
-
-   parser.add_option("", "--test", dest="test",action="store_true",
-                     help="Activate some testing thingies  [default:%default]",
+   param_opts.add_option("", "--outputInferredGenotypes", dest="out_inferred_genotypes",action="store_true",
+                     help="Output haplotypes that might have different genotypes from input. These might be more accurate than called from the genotyping assay.  [default:%default]",
                      default=False
                      )
-   parser.add_option("", "--verbose", dest="verbose",action="store_true",
+
+   parser.add_option_group(param_opts)
+
+
+
+   comp_opts = optparse.OptionGroup(parser, "Computational complexity options",
+                                    "Options mostly affecting computational complexity of the process. "
+                                    "These should only be adjusted if the program takes too much time or memory. "
+                                    "The effect of these options on the quality of the output should be low, but "
+                                    "your mileage may vary.")
+
+
+
+   comp_opts.add_option("", "--float", dest="useFloat32",action="store_true",
+                     help="Use floats, instead of doubles. Saves half the memory but might affect numerical precision and stability.  [default:%default]",
+                     default=False
+                     )
+
+   comp_opts.add_option("-n", "--procs", dest="numProcs",type="int",
+                     help="Number of processors to use in parallel  [default:%default]", metavar="NUM",default=1)
+
+
+   
+
+   comp_opts.add_option("", "--slice_length", dest="slice_length",type="int",
+                     help="Length of alignment slice in markers (to save memory)  [default:%default]", metavar="NUM",default=-1)
+
+
+   comp_opts.add_option("-F", "--fastPreProc", dest="fastPreProc",action="store_true",
+                     help="Do pre-processing (putative IBD segment finding) with fast sweepline method, which disregards prior phase information and IBD-noIBD transition probabilities  [default:%default]",
+                     default=False
+                     )
+   comp_opts.add_option("", "--IBDcoverLimit", dest="ibdCoverLimit",type="int",
+                     help="""Soft lower limit for number of IBD sharing. Only do message passing on the longest NUM segments
+                     covering a locus. The selection is greedy, hence there might be more than minimum number of segments used.
+                     For large number of individuals, 10 might be a good value. Non positive value turn off this limit. [default: %default]""", metavar="NUM",default=-1 )
+
+   comp_opts.add_option("", "--minIBDlength", dest="minIBDlength",type="int",
+                     help="Hard lower limit for length of IBD segment in markers. This should speed up computation by disregarding uninformative IBS segments. [default: %default]",
+                     metavar="NUM",default=10 )
+
+
+
+   comp_opts.add_option("-I", "--iterations", dest="iterations",type="int",
+                     help="Maximum number of iterations to run the message passing. [default:%default]",
+                     metavar="NUM",default=30)
+
+   comp_opts.add_option("-d", "--damping", dest="dampF",type="float",
+                     help="Damping factor for message updates  [default:%default]", metavar="NUM",default=0.75)
+
+
+
+
+   parser.add_option_group(comp_opts)
+
+
+
+
+   untouch_opts = optparse.OptionGroup(parser, "Untouchable options",
+                                       "These options are no use to regular user and should not be touched. They are "
+                                       "likely to crash the program or give completely wrong results. YOU HAVE BEEN WARNED!")
+   
+   untouch_opts.add_option("", "--verbose", dest="verbose",action="store_true",
                      help="Output some more diagnostics  [default:%default]",
                      default=False
                      )
+   untouch_opts.add_option("", "--seed", dest="seed",type="int",
+                     help="Seed for random number generator  [default:%default]", metavar="NUM",default=None)
+   untouch_opts.add_option("", "--use_sum_product", dest="use_max_product",action="store_false",
+                     help="Use sum-product (marginal posteriors) instead max-product (maximum a posteriori) algorithm.",
+                     default=True
+                     )
 
-   parser.add_option("-A", "--intermediate", dest="saveIntermediate",action="store_true",
+   untouch_opts.add_option("", "--test", dest="test",action="store_true",
+                     help="Activate some testing thingies  [default:%default]",
+                     default=False
+                     )
+
+   untouch_opts.add_option("", "--intermediate", dest="saveIntermediate",action="store_true",
                      help="Save intermediate FAD and IBD files  [default:%default]",
                      default=False
                      )
 
-   parser.add_option("-M", "--mpi", dest="useMPI",action="store_true",
+   untouch_opts.add_option("", "--mpi", dest="useMPI",action="store_true",
                      help="Use MPI to distribute the computational and memory load  [default:%default]",
                      default=False
                      )
+
+   parser.add_option_group(untouch_opts)
 
 
 
@@ -262,6 +301,7 @@ def main():
    "Main function for long range phasing. Just to encapsulate the global variables."
    options = process_args()
    global printerr
+   from SLRPlib import SLRP
 
 
    if False and options.outFile is None:
