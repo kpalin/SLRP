@@ -35,10 +35,9 @@ except ImportError:
       return 0
 
 
-
 #sys.path.append("/nfs/users/nfs_k/kp5/Kuusamo/scripts/")
 
-
+import SLRPlib.VCF  
 import SLRPlib.tools as tools
 import SLRPlib.scanTools
 from SLRPlib.tools import printerr
@@ -690,6 +689,15 @@ class longRangePhase:
       
       self.setDamping(dampF)
 
+      self.indivs = 0
+      self.markers = 0
+      self.snpPos = numpy.empty((self.markers,), dtype = int)
+      self.snpCMpos = numpy.empty((self.markers,), dtype = float )
+      self.haplos = numpy.empty((self.markers,self.indivs,2),  dtype = numpy.int8)
+      self.alleles = numpy.empty((self.markers,2), dtype = "|S1")
+#      self.zeroAF = numpy.empty((self.markers,), dtype = float )
+      self.famInfo = []
+
       # Data for threading
       self.poolSize = 1
       # iterateOverIBD synchronization variables
@@ -802,7 +810,7 @@ class longRangePhase:
       self.__minDif = min(x-y for x in altValues for y in altValues if x>y)
 
 
-   def loadGeno(self, fadFileName = None, tpedFileName = None, vcfFileName = None):
+   def loadGeno(self, fadFileNames = [], tpedFileNames = [], vcfFileNames = []):
       "Load input genotypes in any format"
       self.indivs = 0
       self.markers = 0
@@ -812,30 +820,100 @@ class longRangePhase:
 #      self.zeroAF = numpy.empty((self.markers,), dtype = float )
       self.famInfo = []
       
-      if fadFileName is not None:
+      for fadFileName in fadFileNames:
          printerr("Loading %s"%(fadFileName))
          self.loadFAD(fadFileName)
 
-      if tpedFileName is not None:
+      for tpedFileName in tpedFileNames:
          printerr("Loading %s"%(tpedFileName))
          self.loadTPED(tpedFileName)
 
-      printerr("Setting prior likelihoods")
-      self.__setLikelihoods()
 
-      if vcfFileName is not None:
+      self.hLike= -numpy.ones((self.indivs,self.markers, 4), dtype = self.dataType, order = "C")
+      
+
+      for vcfFileName in vcfFileNames:
+         printerr("Loading %s"%(vcfFileName))
          self.loadVCF(vcfFileName)
 
-      self.hLike = numpy.ascontiguousarray(self.hLike)
-      self.hLike = self.hLike.view(ndarray_ADD)
 
       self.snpCMpos =  self.snpPos * self.__mean_recomb_rate
-      if not hasattr(self,"zeroAF"):
+      if not hasattr(self,"zeroAF") or self.zeroAF.min()<=0.0:
          printerr("Prior allele frequency distribution is Beta(%g,%g)."%(1.0,1.0))
-         self.zeroAF = self.estimateZeroAlleleFrequencies()
-
+         zAF = self.estimateZeroAlleleFrequencies()
+         try:
+            self.zeroAF[self.zeroAF<=0.0]  = zAF
+         except AttributeError:
+            self.zeroAF  = zAF
+            
 
    def loadVCF(self, vcfFileName):
+      "Load VCF file using the parser taken from pysam 0.5"
+      vcfFile = SLRPlib.VCF.VCF()
+      vcf_sites = vcfFile.parse(open(vcfFileName))
+
+      info = vcfFile.getinfo()
+      
+      format = vcfFile.getformat()
+
+      indivs = vcfFile.getsamples()
+      n_indivs = len(indivs)
+
+
+
+      d = {(".","|",".") : (3,3),
+           (".","/",".") : (3,3),
+            (0,"|",0) : (0,0),
+            (1,"|",0) : (1,0),
+            (0,"|",1) : (0,1),
+            (1,"|",1) : (1,1),
+            (0,"|",".") : (0,3),
+            (1,"|",".") : (1,3),
+            (0,"|",".") : (0,3),
+            (1,"|",".") : (1,3),
+            (".","|",0) : (3,0),
+            (".","|",0) : (3,0),
+            (".","|",1) : (3,1),
+            (".","|",1) : (3,1),
+            (0,"/",0) : (0,0),
+            (1,"/",0) : (2,2),
+            (0,"/",1) : (2,2),
+            (1,"/",1) : (1,1) }
+           
+
+      if "PL" in format:
+         printerr("Reading genotype likelihoods (PL) from the VCF file")
+         np_site_it = ( (site["chrom"],site["pos"]+1, site["ref"], site["alt"][0], 1 - site.get("AF1",2.0), tuple(d[tuple(site[i]["PL"][0])] for i in indivs) ) \
+                        for site in vcf_sites \
+                        if len(site["filter"]) == 0 and len(site["alt"]) == 1 and len(site["alt"][0]) == 1)
+         
+         VCFdata = numpy.fromiter(np_site_it,dtype = [ ("chrom","|S6") ("bpPos",">i8"), ("zeroAllele","|S1"), ("oneAllele","|S1"),("zeroAlleleFrequency",">f8"),("geno_like",">u8",(n_indivs,3))] )
+      else:
+         printerr("Reading genotypes (GT) from the VCF file")
+         np_site_it = ( (site["chrom"], site["pos"]+1, site["ref"], site["alt"][0], 1 - site.get("AF1",2.0), tuple(d[tuple(site[i]["GT"][0])] for i in indivs) ) \
+                        for site in vcf_sites \
+                        if len(site["filter"]) == 0 and len(site["alt"]) == 1 and len(site["alt"][0]) == 1)
+            
+         
+         VCFdata = numpy.fromiter(np_site_it,dtype = [ ("chrom","|S6"), ("bpPos",">i8"), ("zeroAllele","|S1"), ("oneAllele","|S1"),("zeroAlleleFrequency",">f8"),("haplos",">u1",(n_indivs,2))] )
+
+
+      if self.chrom is not None:
+         VCFdata = VCFdata[ VCFdata["chrom"] == self.chrom ]
+      else:
+         chrom = numpy.unique(VCFdata["chrom"])
+         assert len(chrom) == 1, "Can only take markers from one chromosome"
+         self.chrom = str(chrom[0])
+
+      self.add_observations(VCFdata,indivs)
+
+
+
+
+
+
+         
+   def loadVCF_dummy(self, vcfFileName):
       "Load VCF file with genotype likelihoods. Assume single chromosome with biallelic snps. VCF file must have PL filed with List of Phred-scaled genotype likelihoods, number of values is (#ALT+1)*(#ALT+2)/2"
 
       vcfFile = open(vcfFileName)
@@ -865,7 +943,7 @@ class longRangePhase:
          return (int(vcf_rec[1]),vcf_rec[3],vcf_rec[4], tuple(PL))
 
       #VCFsites = it.chain(*(parseVCFsite(x)    for x in VCFlines if x[6]=="PASS"))
-      VCFsites = (parseVCFsite(x)    for x in VCFlines if x[6]=="PASS")
+      VCFsites = (parseVCFsite(x)    for x in VCFlines if x[6] in (".","PASS") )
 
       VCFdata = numpy.fromiter(VCFsites,dtype = [ ("bpPos",">i8"), ("zeroAllele","|S1"), ("oneAllele","|S1"),("geno_like",">i8",(n_indivs,3))] )
       #VCFdata = numpy.fromiter(VCFsites,dtype = [ ("bpPos",">i8"), ("geno_like",">i8",(n_indivs,3))] )
@@ -873,18 +951,14 @@ class longRangePhase:
       #VCFdata = numpy.fromiter(VCFsites,dtype =">i8" )
       #VCFdata = VCFdata.view([ ("bpPos",">i8"), ("geno_like",">i8",(n_indivs,3))] )
 
+      self.add_observations(VCFdata,indivs)
+
+   def add_observations(self,VCFdata,indivs):
+      "Add loaded VCF data array to already loaded set of geno/haplotype observations"
       n_markers = len(VCFdata)
-      vcfLike = numpy.empty((n_indivs,n_markers,4),dtype = self.dataType)
-      vcfLike[:,:,0] = 0.1*VCFdata["geno_like"][:,:,0].T/numpy.log(10.0)
-      vcfLike[:,:,1] = 0.1*VCFdata["geno_like"][:,:,1].T/numpy.log(10.0) - numpy.log(0.5)  # Split the het likelihood to the two phases
-      vcfLike[:,:,2] = vcfLike[:,:,1] 
-      vcfLike[:,:,3] = 0.1*VCFdata["geno_like"][:,:,2].T/numpy.log(10.0)
+      n_indivs = len(indivs)
 
-      genoHapTempl = numpy.array([[0,0],[2,2],[1,1]], dtype=numpy.int8)
-      vcfHaplos = genoHapTempl[VCFdata["geno_like"].argmin(axis=2)]
-
-
-
+      printerr("Adding %d markers and %d individuals"%(n_markers,n_indivs))
       allPos = numpy.concatenate((VCFdata["bpPos"], self.snpPos))
       uniqPos,uniqInd,uniqInv = numpy.unique( allPos, return_index = True, return_inverse = True)
       # uniqPos is sorted
@@ -895,15 +969,47 @@ class longRangePhase:
       tot_markers = len(uniqPos)
       tot_indivs = n_indivs + self.indivs
 
+      new_like = -numpy.ones((tot_indivs, tot_markers, 4), dtype = self.dataType, order = "C")
+      if len(new2old) > 0:
+         new_like[:self.indivs, new2old,:] = self.hLike
 
-      new_like = numpy.empty((tot_indivs, tot_markers, 4), dtype = self.dataType, order = "C")
-      new_like[:self.indivs, new2old,:] = self.hLike
-      new_like[self.indivs:, new2vcf,:] = vcfLike
+      if "geno_like" in VCFdata.dtype.fields:
+         vcfLike = numpy.empty((n_indivs,n_markers,4),dtype = self.dataType)
+         vcfLike[:,:,0] = 0.1*VCFdata["geno_like"][:,:,0].T/numpy.log(10.0)
+         vcfLike[:,:,1] = 0.1*VCFdata["geno_like"][:,:,1].T/numpy.log(10.0) - numpy.log(0.5)  # Split the het likelihood to the two phases
+         vcfLike[:,:,2] = vcfLike[:,:,1] 
+         vcfLike[:,:,3] = 0.1*VCFdata["geno_like"][:,:,2].T/numpy.log(10.0)
+
+         new_like[self.indivs:, new2vcf,:] = vcfLike
+
+         genoHapTempl = numpy.array([[0,0],[2,2],[1,1]], dtype=numpy.int8)
+         vcfHaplos = genoHapTempl[VCFdata["geno_like"].argmin(axis=2)]
+      elif "haplos" in VCFdata.dtype.fields:
+         vcfHaplos = VCFdata["haplos"]
+      else:
+         raise Exception("VCFdata must have either haplotypes or genotype likelihoods")
+         
+
+
+
 
       new_haplos = numpy.empty((tot_markers, tot_indivs, 2), dtype = int )
       new_haplos[:] = 3
       new_haplos[new2old, :self.indivs, : ] = self.haplos
       new_haplos[new2vcf, self.indivs:, : ] = vcfHaplos
+#      pdb.set_trace()
+
+      new_zAF = numpy.empty(tot_markers, dtype = self.dataType )
+      new_zAF[:] = -1.0
+      try:
+         new_zAF[ new2old ] = self.zeroAF
+      except AttributeError:
+         pass
+      prop_old_AF = ( ( (VCFdata["zeroAlleleFrequency"]<=0)*n_indivs + self.indivs)*1.0/tot_indivs)*(new_zAF[ new2vcf ] >= 0)
+      new_zAF[ new2vcf ] = new_zAF[ new2vcf ] * prop_old_AF + (1.0 - prop_old_AF) * VCFdata["zeroAlleleFrequency"]
+
+         
+
       
 
       # Check, and possibly flip alleles
@@ -917,7 +1023,7 @@ class longRangePhase:
       new_alleles = numpy.zeros((tot_markers,2), dtype = "|S1")
       new_alleles[new2old] = self.alleles
 
-      (new_alleles[new2vcf] == vcf_alleles).prod(axis=1)
+      #(new_alleles[new2vcf] == vcf_alleles).prod(axis=1)
 
 
       # Watson-Crick base pairing
@@ -945,8 +1051,11 @@ class longRangePhase:
             h = new_haplos[new2vcf[i],:self.indivs,:]
             h[h<2] = 1 - h[h<2]
             new_haplos[new2vcf[i],:self.indivs,:] = h
-            
-            new_like[:self.indivs,new2vcf[i],:] = new_like[:self.indivs,new2vcf[i],::-1]
+
+            try:
+               new_like[:self.indivs,new2vcf[i],:] = new_like[:self.indivs,new2vcf[i],::-1]
+            except UnboundLocalError:
+               pass
          else:
             printerr("Bad alleles for %dth snp at %d: VCF:%s <-> prior:%s"%(i, uniqPos[new2vcf[i]], str(a), str(new_alleles[new2vcf[i]])))
             bad_snps.add(new2vcf[i])
@@ -963,7 +1072,11 @@ class longRangePhase:
       self.snpPos = uniqPos[bad_mask]
       self.alleles = new_alleles[bad_mask]
       self.famInfo.extend(indivs)
-      
+
+      try:
+         self.zeroAF = new_zAF[bad_mask]
+      except Error:
+         pass
 
 
 
@@ -1112,33 +1225,41 @@ class longRangePhase:
       return zeroAF
       
       
-   def __setLikelihoods(self):
-      "Initialize haplotype likelihood array"
+   def set_likelihoods(self,force=False):
+      "Initialize haplotype likelihood array. If not force, update only likelihoods that are negative (missing)"
       # This makes hLike[x:y,i,:] as C_contigious. Should be good for MPI and other things.
-      self.hLike = numpy.empty((self.indivs, self.markers, 4),dtype = self.dataType,
-                               order="C")
+
 
       tic = time.clock()
+      to_update = numpy.nonzero( self.hLike.min(axis=2)<0 )
+      n_to_update = len(to_update[0])
+      if n_to_update  == 0 :
+         return
+
+
+
       printerr("Memory for likelihoods %gMB"%(self.hLike.nbytes*1.0/(2.0**20)))
 
       logGp=numpy.zeros((4,4,4),dtype=self.dataType)
       for k,v in self.logG_part.iteritems():
          logGp[k[0],k[1],:]=v
-      self.hLike = logGp[self.haplos[:,:,0],self.haplos[:,:,1],:].transpose((1,0,2))
+      #nLike = logGp[self.haplos[:,:,0],self.haplos[:,:,1],:].transpose((1,0,2))
+      nLike = logGp[self.haplos[to_update[1],to_update[0],0],self.haplos[to_update[1],to_update[0],1],:]
 
-
-      toc = time.clock()
-      printerr("Set likelihoods in %gs."%(toc-tic))
+      
+      self.hLike[to_update[0],to_update[1],:] = nLike
+      
+      self.hLike = numpy.ascontiguousarray(self.hLike)
       self.hLike = self.hLike.view(ndarray_ADD)
 
 
-      self.maxNoise = self.__minDif /  4 #* self.markers * self.indivs) 
-
-      # Break symmetries by adding noise
-
-      hetNoiseLevel = 1e-3
-
       if False:
+         self.maxNoise = self.__minDif /  4 #* self.markers * self.indivs) 
+
+         # Break symmetries by adding noise
+
+         hetNoiseLevel = 1e-3
+
          self.maxNoise = numpy.log(1.0 + hetNoiseLevel) - numpy.log(1.0 - hetNoiseLevel)
          printerr("Breaking symmetries randomly with additive +-%g noise in log likelihood space!"%(self.maxNoise) )
 
@@ -1150,7 +1271,8 @@ class longRangePhase:
          self.hLike[:, :, 2] += numpy.log(2-noiseFactor)
       
 
-
+      toc = time.clock()
+      printerr("Set likelihoods in %gs."%(toc-tic))
 
 
 
@@ -1256,6 +1378,8 @@ class longRangePhase:
 
    def __set_CPT(self, g = None, h = None ):
       "Calculate conditional probability tables for hidden phase variables P(p_j | h0_j, h1_j, p_j-1)"
+
+      assert ( (self.zeroAF>0.0 ) &  ( self.zeroAF<1.0)).all(), "Some of the allele frequencies are impossible."
 
       if g is None: # Gain rate
          g = 1.0 / (4.0 * self.expect_IBS)
@@ -1610,6 +1734,11 @@ class longRangePhase:
 
       # hom 0, hom 1, het 2, missing 3
 
+      assert self.haplos.shape[0] == self.markers
+      assert self.haplos.shape[1] == self.indivs
+      assert self.hLike.shape[1] == self.markers
+      assert self.hLike.shape[0] == self.indivs
+      
       if not hasattr(self,"geno"):
          self.geno = self.haplos.sum(axis=2)
          # Phased hets
@@ -1628,7 +1757,6 @@ class longRangePhase:
       # LLtable[marker,genotype1, genotype2]
       # genotypes hom 0, hom 1, het 2
 
-      #printerr("Calculating log likelihoods from the IBD process. VERY PRELIMINARY. Doesn't work very well. ")
       # Non IBD likelihoods with complete data
       G00,Ghet,G11 = 0,2,1
 
@@ -1737,13 +1865,23 @@ class longRangePhase:
    def loadAlleleFrequencies(self,freqFile):
       "Load allele frequency information from the named file"
       posFreq = numpy.loadtxt(freqFile, dtype = [('pos', int), ('freq', float), ("A0","|S1"), ("A1","|S1")] )
-      assert len(posFreq) == self.markers, "Frequency file format error. There has to be frequencies for exactly the given markers"
-      assert ((posFreq["pos"] - self.snpPos)==0).all(), "Frequency file format error. There has to be frequencies for exactly the given markers"
+      n_freq = len(posFreq)
+      oldOnes = numpy.in1d(posFreq["pos"], self.snpPos)
+      newOnes = numpy.in1d(self.snpPos,posFreq["pos"])
 
+      assert (numpy.diff(posFreq["pos"])>0).all(), "Sites in frequency file must be in increasing order"
+      assert oldOnes.sum()>0, "Frequency file must contain at least one site for which it provides frequencies and alleles"
+      if oldOnes.mean()<1:
+         printerr("Only %g%% of sites in the frequency file are in the input genotypes"%(oldOnes.mean()*100.0))
+      if newOnes.mean()<1:
+         printerr("Only %g%% of sites with genotypes have their frequency in the frequency file"%(newOnes.mean()*100.0))
+         
       load_A = posFreq[["A0","A1"]].view("|S1").reshape((-1,2))
-      assert (self.alleles == load_A).all(), "Some allele mappings do not match between the genotype data and the allele frequency file"
+      assert ((self.alleles[newOnes,:] == load_A[oldOnes,:]) | (self.alleles[newOnes,:]==".")).all(), "Some allele mappings do not match between the genotype data and the allele frequency file"
 
-      self.zeroAF = posFreq["freq"].copy()
+      printerr("Mean squared error between given and inferred allele frequency: %g"%( ( (self.zeroAF[newOnes] - posFreq["freq"][oldOnes])**2).mean() ))
+      
+      self.zeroAF[newOnes] = posFreq["freq"][oldOnes].copy()
 
    def writeAlleleFrequencies(self,freqFile):
       "Write allele frequency information to the named file"
@@ -1784,6 +1922,9 @@ class longRangePhase:
             
 
       # This should make a view with ndarray and a copy if using MPI
+      if self.hLike.min() < 0.0:
+         printerr("Setting prior likelihoods")
+         self.set_likelihoods()
       hLike = self.hLike[:,:,:]
       hLike = hLike.view(numpy.ndarray)
       
@@ -2613,7 +2754,7 @@ class longRangePhase:
 
 
          for p,A,f,h in it.izip(poses,alleles,AF,phases):
-               d["pos"] = p
+               d["pos"] = p - 1 
                d["info"] = {"AF1":[1.0-f] }
                d["ref"] = A[0]
                d["alt"] = [ A[1] ]
@@ -3262,6 +3403,13 @@ class longRangePhase:
        
    def phase(self,iterations=10,intFADbase=None,intIBDbase=None,use_max_product=True):
       "Compute the long range phase over IBD segments in allocedIBD"
+
+
+
+      if self.hLike.min() < 0.0:
+         printerr("Setting prior likelihoods")
+         self.set_likelihoods()
+
 
       if iterations < 1:  # Don't do anything if there is nothing to do
          return

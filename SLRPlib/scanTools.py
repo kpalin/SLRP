@@ -298,6 +298,10 @@ PY_END_ALLOW_THREADS;
 npy_intp dims[2] = {out_regions.size(),5};
 PyObject *out =  PyArray_SimpleNew(2, dims, PyArray_INT);
 PyArrayObject *out_array = (PyArrayObject*)out;
+
+//return_val =  PyArray_SimpleNew(2, dims, PyArray_INT);
+//PyArrayObject *out_array = (PyArrayObject*)&return_val;
+
 #define OUT2(i,j) (*((int*)(out_array->data + (i)*out_array->strides[0] + (j)*out_array->strides[1])))
 PY_BEGIN_ALLOW_THREADS;
 int countOut=0;
@@ -310,8 +314,9 @@ for(std::set<ibd_region_type>::iterator it=out_regions.begin(); it != out_region
 }
 
 PY_END_ALLOW_THREADS;
-return_val = out;
 
+return_val = out;
+Py_DECREF(out);
 
 
 

@@ -31,6 +31,7 @@ from SLRPlib import __version__
 
 import numpy
 import optparse
+import pdb
 
 #from simuPop_utils import *
 
@@ -62,15 +63,15 @@ def process_args():
 
    input_opts.add_option("-f", "--fadFile", dest="fadFile",
                      help="Name of the genotype file in FAD format.  [default:%default]",
-                     metavar="FILE"#,default="Kuusamo_370K_genotypes.hapMapIntersect.chr23.fad"
+                     metavar="FILE",default=[],action="append"
                      )
-   input_opts.add_option("-v", "--vcfFile", dest="vcfFile",
-                     help="Name of the VCF file with genotypes included.  [default:%default]",
-                     metavar="FILE"#,default="Kuusamo_370K_genotypes.hapMapIntersect.chr23.fad"
+   input_opts.add_option("-v", "--vcfFile", dest="vcfFiles",action="append",
+                     help="Name of the VCF file with genotypes.",
+                     metavar="FILE",default=[]
                      )
-   input_opts.add_option("-t", "--tpedFile", dest="tpedFile",
+   input_opts.add_option("-t", "--tpedFile", dest="tpedFile",action="append",
                      help="Name of the genotype file in tped fromat with genotypes coded as A,C,G,T.  [default:%default]",
-                     metavar="FILE"#,default="Kuusamo_370K_genotypes.hapMapIntersect.chr23.fad"
+                     metavar="FILE",default=[]
                      )
 
    input_opts.add_option("-C", "--chrom", dest="chromosome",
@@ -275,12 +276,12 @@ def process_args():
 
    (options, args) = parser.parse_args()
 
-   if options.fadFile is None and options.tpedFile is None and options.vcfFile is None:
-      printerr("Input FAD file needed. Sorry!")
+   if len(options.fadFile)==0 and len(options.tpedFile)==0 and len(options.vcfFiles)==0:
+      printerr("Input genotype file needed. Sorry!")
       parser.print_help()
       sys.exit()
 
-   
+   assert len(options.fadFile) < 2, "Can only take one FAD file at this moment. Sorry!"
    assert(0<=options.dampF<1)
 
 
@@ -374,14 +375,16 @@ def main():
          rlp.setChromosome(options.chromosome)
          rlp.setErrP(options.errP)
          rlp.setCallThreshold(options.callThreshold)
-         printerr("Reading fad %s"%(options.fadFile))
-         printerr("Reading tped %s"%(options.tpedFile))
-         printerr("Reading vcf %s"%(options.vcfFile))
+         printerr("Reading fad %s"%(",".join(options.fadFile)))
+         printerr("Reading tped %s"%(",".join(options.tpedFile)))
+         printerr("Reading vcf %s"%(",".join(options.vcfFiles)))
+
          try:
-            rlp.loadGeno( options.fadFile, options.tpedFile, options.vcfFile )
+            rlp.loadGeno( options.fadFile , options.tpedFile, options.vcfFiles )
          except IOError,e:
             printerr(str(e))
             return False
+
          printerr("Read genotypes for %d individuals and %d markers!"%(rlp.indivs,rlp.markers))
 
 
