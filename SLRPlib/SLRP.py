@@ -31,8 +31,9 @@ from SLRPlib import __version__
 try:
    from meminfo import resident
 except ImportError:
-   def resident(since=0.0):
-      return 0
+#   def resident(since=0.0):
+#      return 0
+   pass
 
 
 #sys.path.append("/nfs/users/nfs_k/kp5/Kuusamo/scripts/")
@@ -363,7 +364,7 @@ try:
             
       def __getattr__(self,name):
          return getattr(self.data, name)
-  
+      
 
    class mpi_ndarrayMsg(mpi_ndarrayRMA):
       def __init__(self,data = None, copyData = True):
@@ -698,11 +699,13 @@ class longRangePhase:
 #      self.zeroAF = numpy.empty((self.markers,), dtype = float )
       self.famInfo = []
 
+      self.fCount = 0
+
       # Data for threading
       self.poolSize = 1
       # iterateOverIBD synchronization variables
       self.__ioIBD_sync = ThreadBarrier(self.poolSize)
-      self.__assist = threading.local()
+      self._assist = threading.local()
       self.__inlining_lock = threading.Lock()
 
       self.ibd_regionsLoader = None 
@@ -1289,8 +1292,8 @@ class longRangePhase:
 
    def visualiseP(self, ind1, ind2, beginM, endM,fname = None):
       "Visualise the phase probabilities from beginM marker to endM marker"
-      ca2pP=self.__assist.cp2pP
-      ca2p=self.__assist.ca2p
+      ca2pP=self._assist.cp2pP
+      ca2p=self._assist.ca2p
 
       def normalize_beliefs(x):
          x = numpy.exp(-x)
@@ -1534,14 +1537,19 @@ class longRangePhase:
 
 
       self.firstCP2P = numpy.array([self.ibd_prob, self.ibd_prob, self.ibd_prob, self.ibd_prob, 1.0-4.0*self.ibd_prob],dtype=self.dataType)
+      self.firstCP2P = numpy.array([self.ibd_prob/2,
+                                    self.ibd_prob/2,
+                                    self.ibd_prob/2,
+                                    self.ibd_prob/2,
+                                    1.0-2.0*self.ibd_prob],dtype=self.dataType)
 
 
       self.firstCP2P = numpy.array(-numpy.log(self.firstCP2P),dtype=self.dataType)
       printerr("firstcp2p : ",numpy.exp(-self.firstCP2P))
 
 
-      self.CPT[0,:,0:4,:] = self.ibd_prob
-      self.CPT[0,:,4,:] = 1-4*self.ibd_prob
+      #self.CPT[0,:,0:4,:] = self.ibd_prob
+      #self.CPT[0,:,4,:] = 1-4*self.ibd_prob
 
 
       
@@ -1901,14 +1909,14 @@ class longRangePhase:
       #       firstCP2P=self.firstCP2P
       #       bt=self.backtrack
 
-      self.____assist_arrays()
+      self._assist_arrays()
 
 
-      ca2p=self.__assist.ca2p
+      ca2p=self._assist.ca2p
       CPT=self.CPT
 
       firstCP2P=self.firstCP2P
-      bt=self.__assist.backtrack
+      bt=self._assist.backtrack
       
       #printerr("Running __computeOneIBDnoUpdate")
 
@@ -2005,21 +2013,21 @@ class longRangePhase:
    def __computeOneIBD(self,ind1,ind2,beginM,endM,ca2h1,ca2h2,doUpdate=True, serializedPass = False):
       "Compute one forward-backward message passing over pair of individuals on restricted region. Return the mean squared error for messages to the haplotype nodes."
       #TODO: Improve speed. Takes 15% of time, excluding the C part
-      self.____assist_arrays()
+      self._assist_arrays()
 
 
-      #ca2pN=self.__assist.cp2pN
-      ca2pP=self.__assist.cp2pP
-      ca2p=self.__assist.ca2p
-      #p2ca=self.__assist.p2ca
-      #p2cpN=self.__assist.p2cpN
-      #p2cpP=self.__assist.p2cpP
+      #ca2pN=self._assist.cp2pN
+      ca2pP=self._assist.cp2pP
+      ca2p=self._assist.ca2p
+      #p2ca=self._assist.p2ca
+      #p2cpN=self._assist.p2cpN
+      #p2cpP=self._assist.p2cpP
       CPT=self.CPT
       #cpj=self.CPj
       dampF=self.dampF
       firstCP2P=self.firstCP2P
       #firstCP2P = numpy.array(-numpy.log([0.0, 0.0, 0.0, 0.0, 1.0]),dtype=self.dataType)
-      bt=self.__assist.backtrack
+      bt=self._assist.backtrack
 
       #firstCP2P=numpy.zeros(5)
       #print "firstCP2P:",firstCP2P
@@ -2064,8 +2072,8 @@ class longRangePhase:
             ij = 0;
             for(p=0;p<5;p++) {
                if(beginM == 0 ) {
-                   //ca2p(p,0) = firstCP2P(p); //0.0;
-                   ca2p(p,0) = 0.0;
+                   ca2p(p,0) = firstCP2P(p); //0.0;
+                   //ca2p(p,0) = 0.0;
                } else {
                   if(p == 4) {
                      ca2p(p,0) = 0.0;
@@ -2132,8 +2140,8 @@ class longRangePhase:
             // Backward
             for(p=0;p<5;p++) { //Initialization
                if(endM == (num_markers - 1) ) { // No information past the end of chromosome
-                  //ca2pP(p,endM-beginM+1)=(%(cdType)s)firstCP2P(p); // THIS IS UNDER TESTING #  Fri Sep 03 16:35:32 BST 2010 
-                  ca2pP(p,endM-beginM+1)=0.0;
+                  ca2pP(p,endM-beginM+1)=(%(cdType)s)firstCP2P(p); // THIS IS UNDER TESTING #  Fri Sep 03 16:35:32 BST 2010 
+                  //ca2pP(p,endM-beginM+1)=0.0;
                   //std::cerr<<"End of chromosome@"<<endM<<": ca2pP <- " << ca2pP(p,endM-beginM+1) <<std::endl;
                } else { // Within the chromosome, IBD region ends in non IBD state
                   if(p == 4) {
@@ -2337,110 +2345,68 @@ class longRangePhase:
 
       return sum_sqr_E  #meanSqrD
 
-   def callCurStates(self,beginM=0,endM=None):
-      "Very, very silly way of calling MAP phase states. Only used for regression testing.!"
-      if endM is None:
-         endM=self.markers-1
-
-      
-      firstP=4
-
-      segLast=endM-beginM
-      #pProbs=(self.__assist.ca2p[:,segLast]+self.__assist.cp2pN[:,segLast]+self.CPj[endM,:,4])
-      pProbs = self.__assist.ca2p[:,segLast] + self.firstCP2P
-      try:
-         self.cCount+=1
-      except AttributeError :
-         self.cCount=1
-
-      #pProbs=(self.ca2p[:,endM]+self.cp2pN[:,endM]+self.cp2pP[:,endM])
-
-      if pProbs.max()==0.0:
-         firstP=4
-      else:
-         firstP=int(pProbs.argmin())
-      if firstP!=4:
-         try:
-            self.fCount+=1
-         except AttributeError :
-            self.fCount=1
-         #sys.stderr.write("Need to test this!! Should usually give 4, possibly sometimes something else! Now %d. (%dth case out of %d)\n"%(firstP,self.fCount,self.cCount))
-
-
-
-      def _backt(i,p=4):
-         yield p
-         p=self.__assist.backtrack[p,i]
-         while p>=0:
-            yield p               
-            i-=1
-            p=self.__assist.backtrack[p,i]
-         assert(p==-1)
-
-
-      rPcalls=list(_backt(endM,firstP))
-
-      assert len(rPcalls)==(endM-beginM+1)
-      pCalls=reversed(rPcalls)
-
-      if rPcalls[0]!=4 and rPcalls[1]==4: # Only one non 4 state:
-         printerr("Nasty one marker IBD segment at %d"%(beginM))
-
-
-      return it.chain(it.repeat(4,beginM),pCalls,it.repeat(4,self.markers-1-endM))
-
-
-   #TODO: Make this faster. Seems to take 15-20% of time
+   #TODO: Make this faster. 
    def callCurIBD(self,beginM=0,endM=None):
-      "Slightly faster way of computing IBD regions!"
-      
-      if endM is None:
-         endM=self.markers-1
+     "Slightly faster way of computing IBD regions!"
+
+     if endM is None:
+        endM=self.markers-1
 
 
-      firstP=4
-      segLast=endM-beginM
-      # Probabilities of the last state
-      #pProbs=(self.__assist.ca2p[:,segLast]+self.__assist.cp2pN[:,segLast]+self.CPj[endM,:,4])
-      pProbs = self.__assist.ca2p[:,segLast+1] #+ self.__assist.cp2pP[:,segLast]
-      try:
-         self.cCount+=1
-      except AttributeError :
-         self.cCount=1
+     firstP=4
+     segLast=endM-beginM
+     # Probabilities of the last state
+     #pProbs=(self._assist.ca2p[:,segLast]+self._assist.cp2pN[:,segLast]+self.CPj[endM,:,4])
+     try:
+        self.cCount+=1
+     except AttributeError :
+        self.cCount=1
 
-
-      if pProbs.max()==0.0:
-         firstP=4
-      else:
-         firstP=int(pProbs.argmin())
-      if firstP!=4:
-         try:
-            self.fCount+=1
-         except AttributeError :
-            self.fCount=1
-         #sys.stderr.write("Need to test this!! Should usually give 4, possibly sometimes something else! Now %d. (%dth case out of %d)\n"%(firstP,self.fCount,self.cCount))
-
-
-
-      h1=[0,1,0,1]
-      h2=[0,0,1,1]
-      #h1={0:0, 1:1, 2:0, 3:1}
-      #h2={0:0, 1:0, 2:1, 3:1}
-      r=[]
-      i=endM
-      p=firstP
-      #print pProbs,"=>",firstP
-      while i>beginM and p>=0:
-         endM=i
-         curState=p
+        
+     if endM == self.markers - 1:
+         # Find the last IBD state if we are starting to work from the last marker
+         #pdb.set_trace()
          
-         while curState==p:
-            p=self.__assist.backtrack[p,i]
-            i-=1
-         if curState<4:
-            r.append((h1[curState],h2[curState],i+1,endM))
-            
-      return r
+         pProbs = self._assist.ca2p[:,endM - beginM + 1 ] 
+         # 
+         if pProbs.max()<=0.0:
+            firstP=4
+         else:
+            firstP=int(pProbs.argmin())
+         if firstP!=4:
+            try:
+               self.fCount+=1
+            except AttributeError :
+               self.fCount=1
+#         sys.stderr.write("Need to test this!! Should usually give 4@%d, possibly sometimes something else! Now %d. (%dth case out of %d)\n"%(endM,firstP,self.fCount,self.cCount))
+
+
+
+     h1=[0,1,0,1]
+     h2=[0,0,1,1]
+     #h1={0:0, 1:1, 2:0, 3:1}
+     #h2={0:0, 1:0, 2:1, 3:1}
+     #firstP = 4
+     r=[]
+     # backtrack[:,i] is shifted by 1 for historical reasons
+     # i.e.  the predecessor of state p at site i is backtrack[p,i+1]
+     i = endM
+     p=firstP
+     #print pProbs,"=>",firstP
+     while  i >= beginM:  #p>=0:
+        curState = p
+
+        while curState==p and i >= beginM:
+           p = self._assist.backtrack[p,i + 1]
+           i -= 1
+
+           # Current state at site i is p
+
+        if curState<4:
+           r.append((h1[curState],h2[curState],i + 1,endM ))
+        endM = i
+
+     return r
 
   
    def processAllocedIBD(self,allocedIBD,MAPestimate=True):
@@ -2487,7 +2453,7 @@ class longRangePhase:
       prevMeanSqrE = 1.0
       repeatCount=it.count(0)
       repeat=repeatCount.next()
-      
+
       while  repeat<iterations:
          start_repeat_time=time.time()
          printerr("Repeat %d"%(repeat))
@@ -2566,7 +2532,15 @@ class longRangePhase:
       allocedIBD = allocedIBD[sOrder]
       sOrder = allocedIBD.argsort(order=["beginMarker"])
       allocedIBD = allocedIBD[sOrder]
+      #def duck_punch_callCurIBD():
+      #   import SLRPlib.alt
+      #   reload(SLRPlib.alt)
+      #   import types
+      #   self.callCurIBD = types.MethodType(SLRPlib.alt.callCurIBD_alt,self)
 
+      #duck_punch_callCurIBD()
+      #_something = False
+      
       while  repeat<iterations:
 
          start_repeat_time=time.time()
@@ -2644,6 +2618,8 @@ class longRangePhase:
       # Making ibd calls
       start_repeat_time=time.time()
       totMeanSqrE=0.0
+      _phases = self.callPhasesNumpy()
+      
       for ibdIdx,(ind1,ind2,beginM,endM,ca2h1,ca2h2,meanSqrD,_) in enumerate(allocedIBD):
          if ibdIdx%aboutPercent == 0:
             oldTime,newTime=newTime,time.time()
@@ -2664,9 +2640,9 @@ class longRangePhase:
 
          if (ca2h1.shape[0] == (endM-beginM+1) ):
             ind1, ind2 = int(ind1), int(ind2)
-            my_ibdSegments.extend( it.chain.from_iterable( (ind1+h1,ind2+h2,startM,stopM) for  h1,h2,startM,stopM in self.callCurIBD(beginM,endM) ) )
-            #self.ibdSegments.update((ind1+h1,ind2+h2,startM,stopM) \
-            #                        for  h1,h2,startM,stopM in self.callCurIBD(beginM,endM))
+            cur_ibd = self.callCurIBD(beginM,endM)
+            my_ibdSegments.extend( it.chain.from_iterable( (ind1+h1,ind2+h2,startM,stopM)
+                                                           for  h1,h2,startM,stopM in cur_ibd ) ) 
 
             
          
@@ -2891,7 +2867,11 @@ class longRangePhase:
          yield phases
 
 
+   def callPhasesNumpy(self,allow_inferred_genotypes = False):
+      "Return called phases in numpy array shaped (markers,indivs,2)"
+      return numpy.dstack(list( self.callPhases(allow_inferred_genotypes) ) ).transpose((2,0,1))
 
+   
    def callPhases(self,allow_inferred_genotypes=False):
       "Return an array of called phases"
 
@@ -3180,18 +3160,17 @@ class longRangePhase:
          self.slice_len = slice_length
          
 
-   def ____assist_arrays(self):
+   def _assist_arrays(self):
       "Make the assistant arrays for phasing. Keep them thread local"
-      if not hasattr(self.__assist,"backtrack"):
-         #self.__assist.cp2pN=numpy.zeros((5,self.markers),dtype=self.dataType,order='F')
-         self.__assist.cp2pP=numpy.zeros((5,self.markers+1),dtype=self.dataType,order='F')
-         self.__assist.ca2p=numpy.zeros((5,self.markers+1),dtype=self.dataType,order='F')
-         #self.__assist.p2ca=numpy.zeros((5,self.markers),dtype=self.dataType,order='F')
-         #self.__assist.p2cpN=numpy.zeros((5,self.markers+1),dtype=self.dataType,order='F')
-         #self.__assist.p2cpP=numpy.zeros((5,self.markers),dtype=self.dataType,order='F')
-         self.__assist.backtrack=numpy.zeros((5,self.markers+1),dtype=numpy.int,order='F')
-
-
+      if not hasattr(self._assist,"backtrack"):
+         self._assist.cp2pP=numpy.zeros((5,self.markers+1),dtype=self.dataType,order='F')
+         self._assist.ca2p=numpy.zeros((5,self.markers+1),dtype=self.dataType,order='F')
+         self._assist.backtrack=numpy.zeros((5,self.markers+1),dtype=numpy.int,order='F')
+      else:
+         self._assist.cp2pP[:] = -1
+         self._assist.ca2p[:] = -1
+         self._assist.backtrack[:] = -1
+         
    def filterIBDcover(self, coverLimit, lenLimit = -1):
       "Filter IBD segments according to haplotype coverage and length (hard length limit"
       #segLengthDesc = self.ibd_regions["score"].argsort()[::-1]
@@ -3579,7 +3558,7 @@ class longRangePhase:
       #self.ibdSegments = list(ibd_segment_cache)
       #self.ibdSegments = None
       #self.ibdSegments = ibd_segment_cache
-      self.__assist = None
+      self._assist = None
 
 
 
