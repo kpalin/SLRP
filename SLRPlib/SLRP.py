@@ -813,8 +813,25 @@ class longRangePhase:
       self.__minDif = min(x-y for x in altValues for y in altValues if x>y)
 
 
-   def loadGeno(self, fadFileNames = [], tpedFileNames = [], vcfFileNames = []):
-      "Load input genotypes in any format"
+   def loadDensePanelIndivs(self, fname):
+      """Load names of individuals with in the 'dense' panel to
+      be genotype improved or used as source of genotype imputation"""
+      import re
+      densePanel = set( re.sub("\s+",":",line.strip()) for line in open(fname) )
+      
+      denseIndivs = set()
+      for i in densePanel:
+         try:
+            denseIndivs.add(self.famInfo.index(i))
+         except ValueError:
+            printerr("Warning: individual %s does not have genotypes set up"%(i))
+      self.denseIndivs = numpy.array(sorted(denseIndivs), dtype = numpy.int)
+      assert len(self.denseIndivs), "Must have at least one individual in the dense panel with genotypes"
+
+
+   def loadGeno(self, fadFileNames = [], tpedFileNames = [], vcfFileNames = [], fad_alleles_and_freq = None):
+      """Load input genotypes in any format. Only one fad file can be sensibly given. If giving also 
+      vcf or tped files along with fad, must give also fad_alleles."""
       self.indivs = 0
       self.markers = 0
       self.snpPos = numpy.empty((self.markers,), dtype = int)
@@ -827,6 +844,10 @@ class longRangePhase:
          printerr("Loading %s"%(fadFileName))
          self.loadFAD(fadFileName)
 
+         if fad_alleles_and_freq is not None:
+            self.zeroAF = self.estimateZeroAlleleFrequencies()
+            self.loadAlleleFrequencies(fad_alleles_and_freq)
+         
       for tpedFileName in tpedFileNames:
          printerr("Loading %s"%(tpedFileName))
          self.loadTPED(tpedFileName)
@@ -848,7 +869,8 @@ class longRangePhase:
             self.zeroAF[self.zeroAF<=0.0]  = zAF
          except AttributeError:
             self.zeroAF  = zAF
-            
+
+      self.denseIndivs = numpy.arange(self.indivs, dtype=numpy.int)
 
    def loadVCF(self, vcfFileName):
       "Load VCF file using the parser taken from pysam 0.5"
@@ -1040,13 +1062,14 @@ class longRangePhase:
          if (a == new_alleles[new2vcf[i]] ).all():
             continue
          elif (new_alleles[new2vcf[i]] == ["",""] ).all() or \
-                  a[0] == WC[new_alleles[new2vcf[i]][0]] and a[1] == WC[new_alleles[new2vcf[i]][1]]:
+                  ( a[0] == WC.get(new_alleles[new2vcf[i]][0],None) and \
+                    a[1] == WC.get(new_alleles[new2vcf[i]][1],None) ):
             # The reported strand is different, but the genotypes are OK, or this is a new site
             new_alleles[new2vcf[i]] = a
             continue
          elif (a[::-1] == new_alleles[new2vcf[i]] ).all() \
-                  or ( a[1] == WC[new_alleles[new2vcf[i]][0]] and a[0] == WC[new_alleles[new2vcf[i]][1]] ):
-            if ( a[1] == WC[new_alleles[new2vcf[i]][0]] and a[0] == WC[new_alleles[new2vcf[i]][1]] ):
+                  or ( a[1] == WC.get(new_alleles[new2vcf[i]][0], None) and a[0] == WC(new_alleles[new2vcf[i]][1], None) ):
+            if ( a[1] == WC.get(new_alleles[new2vcf[i]][0], None) and a[0] == WC.get(new_alleles[new2vcf[i]][1], None) ):
                new_alleles[new2vcf[i],0] = WC[a[1]]
                new_alleles[new2vcf[i],1] = WC[a[0]]
                
@@ -1720,6 +1743,7 @@ class longRangePhase:
             ibdCoverCounts[beginM:endM+1,ind1] += 1
             ibdCoverCounts[beginM:endM+1,ind2] += 1
       return ibdCoverCounts
+   
    def ibdCoverCounts2(self,scoreLimit = 0.0 ):
       "Calculate the coverage of the called IBD relations for each site x haplotype"
       ibdCoverCounts=numpy.zeros( (self.markers, self.indivs,2),
@@ -1885,7 +1909,11 @@ class longRangePhase:
          printerr("Only %g%% of sites with genotypes have their frequency in the frequency file"%(newOnes.mean()*100.0))
          
       load_A = posFreq[["A0","A1"]].view("|S1").reshape((-1,2))
-      assert ((self.alleles[newOnes,:] == load_A[oldOnes,:]) | (self.alleles[newOnes,:]==".")).all(), "Some allele mappings do not match between the genotype data and the allele frequency file"
+      assert ((self.alleles[newOnes,:] == load_A[oldOnes,:]) |  ( self.alleles[newOnes,:]=="." )
+                                                                 | (self.alleles[newOnes,:]=="0" )
+                                                                 | (self.alleles[newOnes,:]=="1" ) ).all(), "Some allele mappings do not match between the genotype data and the allele frequency file"
+
+      self.alleles[newOnes,:] = load_A[oldOnes,:]
 
       printerr("Mean squared error between given and inferred allele frequency: %g"%( ( (self.zeroAF[newOnes] - posFreq["freq"][oldOnes])**2).mean() ))
       
@@ -3285,16 +3313,8 @@ class longRangePhase:
          printerr("Max end",self.ibd_regions["endM"].max())
 
 
-
-   def phasePreProc(self, ibdSegmentCalls = None,min_cover = 15,min_ibd_length = 10):
-      "Compute the first step of SLRP. i.e. find putative IBD segments"
-      
-      ibdRegions=[]
-      newTime=time.time()
-      startTime=newTime
-      
-      self.computeGenos()
-      self.computeLogLikeTable()
+   def LLscan_and_filter(self, coverIndivs = None,otherIndivs = None, min_cover = 15, min_ibd_length = 10):
+      "Run the fast score based scan and filtering of plausible IBD segments"
       
       assert self.geno.flags.c_contiguous, "Genotype array must be C-contiguous"
       assert self.geno.strides[1] == 1, "Geno array must be indexable by first coordinate."
@@ -3310,20 +3330,55 @@ class longRangePhase:
 
       assert peakThreshold > 0
       assert dipThreshold > 0
+
+      if coverIndivs is None:
+         coverIndivs = numpy.arange(self.indivs, dtype=numpy.int)
+
+      if otherIndivs is None:
+         otherIndivs = numpy.arange(self.indivs, dtype=numpy.int)
+         
+      
       if self.poolSize <= 1 or self.indivs < self.poolSize * 3 :
-         ibdRegions=self.c_ext.LLscan_and_filter(0,self.indivs,self.geno,self.LLtable,peakThreshold,dipThreshold,min_cover,min_ibd_length )
+         ibdRegions=self.c_ext.LLscan_and_filter(coverIndivs, otherIndivs,
+                                                 self.geno,
+                                                 self.LLtable,
+                                                 peakThreshold,
+                                                 dipThreshold,
+                                                 min_cover,
+                                                 min_ibd_length )
       else:
-         chunkSize = int( self.indivs * 1.0 / self.poolSize + 1) 
+         chunkSize = int( len(coverIndivs) * 1.0 / self.poolSize + 1) 
 
          #subsetPairs=list( list(it.islice(allPairs,chunkSize))  for i in range(0, numPairs, chunkSize) )
-         subsetPairs=[(i,min(self.indivs,i+chunkSize)) for i in range(0, self.indivs, chunkSize) ]
+         subsetPairs=[(i,min(len(coverIndivs),i+chunkSize)) for i in range(0, len(coverIndivs), chunkSize) ]
          
          printerr("Chunks of size",chunkSize)
          printerr("subsets",len(subsetPairs),subsetPairs)
-         ibdRegions = self.pmap(lambda x:self.c_ext.LLscan_and_filter(x[0],x[1],self.geno,self.LLtable,peakThreshold,dipThreshold,min_cover,min_ibd_length ), subsetPairs )
+         ibdRegions = self.pmap(lambda x:self.c_ext.LLscan_and_filter(coverIndivs[x[0]:x[1]],otherIndivs,
+                                                                      self.geno,
+                                                                      self.LLtable,
+                                                                      peakThreshold,
+                                                                      dipThreshold,
+                                                                      min_cover,
+                                                                      min_ibd_length ), subsetPairs )
          ibdRegions = numpy.concatenate(ibdRegions)
          ibdRegions = tools.uniqueRows(ibdRegions)
-         newTime = time.time()
+
+      return ibdRegions
+
+   def phasePreProc(self, ibdSegmentCalls = None,min_cover = 15,min_ibd_length = 10):
+      "Compute the first step of SLRP. i.e. find putative IBD segments"
+      
+      ibdRegions=[]
+      newTime=time.time()
+      startTime=newTime
+      
+      self.computeGenos()
+      self.computeLogLikeTable()
+
+      ibdRegions = self.LLscan_and_filter(self.denseIndivs,min_cover=min_cover, min_ibd_length = min_ibd_length)
+
+      newTime = time.time()
 
 
       #ibdRegions=ibdRegions[(ibdRegions[:,0]==4)]
@@ -3338,11 +3393,18 @@ class longRangePhase:
       numpy.random.shuffle(ibdRegions)
 
 
+
       myStack = numpy.hstack(( ibdRegions[:,:2], numpy.reshape(ibdRegions[:,4],(-1,1)), ibdRegions[:,2:4], self.snpPos[ibdRegions[:,2:4]]) )
       self.ibd_regions = numpy.ascontiguousarray(myStack, dtype=numpy.int32)
 
       self.ibd_regions = self.ibd_regions.T.view(self.ibd_regions_dtype_int)[0]
 
+      if len(self.denseIndivs) < self.indivs:
+         # scan also pairs that are covered with something from the dense panel
+         ibdCover = self.ibdCoverCounts()>0
+         ibdCover = numpy.array(ibdCover,dtype=numpy.int8)
+         
+         
 
       if ibdSegmentCalls is not None:
          open(tools.addSuffix(ibdSegmentCalls,".aibd"),"w").writelines("%d\t%d\t%g\t%d\t%d\t%d\t%d\n"%(x[0],x[1],float(x[2]),x[3],x[4],x[5],x[6]) for x in self.ibd_regions)

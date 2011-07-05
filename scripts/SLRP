@@ -95,8 +95,23 @@ def process_args():
                      metavar="FILE",default=None
                      )
    
+   input_opts.add_option("-D", "--densePanel", dest="densePanelFile",
+                     help="File listing the individuals in the 'dense' genotype panel. This is the "
+                         "set of individuals used as source of genotype imputation or target of "
+                         "genotype improvement (or phasing with prephased non-dense haplotypes). "
+                         "Note that white spaces in the individual names will be replaced with ':'"
+                         "[default:%default]",
+                     metavar="FILE",default=None
+                     )
+   
+
    input_opts.add_option("-l", "--scoreLim", dest="scoreLimit",type="float",
                      help="Minimum score above which to use the IBD matches loaded from a file [default:%default]", metavar="NUM",default=0.0)
+
+   input_opts.add_option("-R", "--freq", dest="freqFile",
+                     help="File to read the allele frequencies from.   [default:%default]",
+                     metavar="FILE",default=None
+                     )
 
    parser.add_option_group(input_opts)
 
@@ -138,8 +153,8 @@ def process_args():
                      metavar="FILE",default=None
                      )
 
-   output_opts.add_option("-R", "--freq", dest="freqFile",
-                     help="File to read the allele frequencies from. If the file doesn't exits, the alele frequency estimates are written there   [default:%default]",
+   output_opts.add_option("-W", "--writeFreq", dest="outFreqFile",
+                     help="File to write the alele frequency estimates to  [default:%default]",
                      metavar="FILE",default=None
                      )
 
@@ -303,7 +318,7 @@ def main():
    options = process_args()
    global printerr
    from SLRPlib import SLRP
-
+   import os.path
 
    if False and options.outFile is None:
       printerr("Nothing to store, nothing to do..")
@@ -380,22 +395,20 @@ def main():
          printerr("Reading vcf %s"%(",".join(options.vcfFiles)))
 
          try:
-            rlp.loadGeno( options.fadFile , options.tpedFile, options.vcfFiles )
+            rlp.loadGeno( options.fadFile , options.tpedFile, options.vcfFiles ,fad_alleles_and_freq = options.freqFile)
          except IOError,e:
             printerr(str(e))
             return False
 
          printerr("Read genotypes for %d individuals and %d markers!"%(rlp.indivs,rlp.markers))
 
+         if options.densePanelFile:
+            rlp.loadDensePanelIndivs(options.densePanelFile)
 
-         if options.freqFile is not None:
-            try:
-               rlp.loadAlleleFrequencies(options.freqFile)
-            except IOError:
-               rlp.writeAlleleFrequencies(options.freqFile)
-               printerr("Wrote allele frequencies to %s."%(options.freqFile))
-            else:
-               printerr("Loaded allele frequencies from %s."%(options.freqFile))
+
+         if options.outFreqFile is not None:
+            rlp.writeAlleleFrequencies(options.outFreqFile)
+            printerr("Wrote allele frequencies to %s."%(options.outFreqFile))
 
          if options.ibdFile is not None:
             printerr("Reading ibd file",options.ibdFile)

@@ -20,8 +20,7 @@ def add_LLscan_and_filter_func(mod):
    dipThreshold = 0.0
    cover_limit = 1
    min_length = 10
-   from_indiv = 0
-   to_indiv = -1
+   indivs_to_cover = numpy.array([0], dtype = numpy.int)
    indPairs = numpy.zeros((1,2),dtype="int")
    genos = numpy.array([[0]],dtype=numpy.int8)
    
@@ -80,12 +79,11 @@ kvek_t(int) ibdRegions;
 kv_init(ibdRegions);
 */
 PY_BEGIN_ALLOW_THREADS;
-if(to_indiv<0 || to_indiv>individuals) {
-   to_indiv=individuals;
-}
 
-for(int i1=from_indiv; i1 < to_indiv ; i1++) {
-  for(int i2=0; i2 < individuals ; i2++) {
+for(int idx1=0; idx1 < Nindivs_to_cover[0]; idx1++) {
+  int i1 = INDIVS_TO_COVER1(idx1);
+  for(int idx2=0; idx2 < Nindivs_covering[0] ; idx2++) {
+    int i2 = INDIVS_COVERING1(idx2);
     if(i1==i2) {
          continue;
     }
@@ -322,13 +320,15 @@ Py_DECREF(out);
 
 """
 
+
    mod.customize.add_header("<algorithm>")
    mod.customize.add_header("<set>")
+   indivs_covering = indivs_to_cover
    for cDataType,dataType in (("double",numpy.float64),("float",numpy.float32)):
       LLtable = numpy.zeros((1,3,3),dtype = dataType)
       func = ext_tools.ext_function('LLscan_and_filter_%s'%(cDataType),
                                     code%{"cType":cDataType},
-                                    ["from_indiv","to_indiv",
+                                    ["indivs_to_cover","indivs_covering",
                                      "genos","LLtable", "peakThreshold",
                                      "dipThreshold","cover_limit","min_length"])
       mod.add_function(func)
