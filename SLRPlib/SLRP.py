@@ -2390,7 +2390,6 @@ class longRangePhase:
         
      if endM == self.markers - 1:
          # Find the last IBD state if we are starting to work from the last marker
-         #pdb.set_trace()
          
          pProbs = self._assist.ca2p[:,endM - beginM + 1 ] 
          # 
@@ -2639,11 +2638,12 @@ class longRangePhase:
 
          self.__ioIBD_sync.Barrier()
 
+
       printerr("Running last iteration and making IBD calls")
       # Making ibd calls
       start_repeat_time=time.time()
       totMeanSqrE=0.0
-      _phases = self.callPhasesNumpy()
+      #_phases = self.callPhasesNumpy()
       
       for ibdIdx,(ind1,ind2,beginM,endM,ca2h1,ca2h2,meanSqrD,_) in enumerate(allocedIBD):
          if ibdIdx%aboutPercent == 0:
@@ -2771,7 +2771,7 @@ class longRangePhase:
          phase_arr = numpy.empty((4,4),dtype=numpy.object)
          for k,v in phase2str.iteritems(): phase_arr[k]=v
 
-         #pdb.set_trace()
+
 
          for marker,p,A,f,h in it.izip(it.count(),poses,alleles,AF,phases):
                d["pos"] = p - 1 
@@ -3288,7 +3288,6 @@ class longRangePhase:
                skipCount += 1
                printerr("Skipping",ind1,ind2,score,beginM,endM,"Because",i1view.min(),i2view.min())
                #print self.ibd_regions[(self.ibd_regions["ind1"]==4)&(self.ibd_regions["beginM"]<=3896)&(self.ibd_regions["endM"]>=4015)]
-               pdb.set_trace()
 
       i1view = None
       i2view = None
@@ -3456,7 +3455,7 @@ class longRangePhase:
             self.ibd_regions = ibdRegions.T.view(self.ibd_regions_dtype_int)[0]
          numpy.random.shuffle(self.ibd_regions)
 
-#      pdb.set_trace()
+
       _append_ibdRegions(ibdRegions)
 
       if len(self.denseIndivs) < self.indivs:
