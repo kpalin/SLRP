@@ -590,13 +590,26 @@ except NameError:
 
 
 
+
+
+
 def open(filename,mode="r",bufsize=-1):
     "Open a file, which is possibly gzipped."
     import gzip
     import os
-    
+    import stat
+
     from __builtin__ import open as bopen
-    if filename[-3:] == ".gz" or "r" in mode:
+    try:
+        file_mode = os.stat(filename)[stat.ST_MODE]
+        is_fifo = stat.S_ISFIFO(file_mode)
+    except OSError,e:
+        is_fifo = False
+        pass
+
+    if is_fifo or filename[-3:] != ".gz":
+        f = bopen(filename,mode,bufsize)
+    else:
         f = gzip.open(filename,mode,bufsize)
 
         if "r" in mode:
@@ -608,15 +621,9 @@ def open(filename,mode="r",bufsize=-1):
                     f = bopen(filename,mode,bufsize)
                 else:
                     raise
-    else:
-        f = bopen(filename,mode,bufsize)
         
 
     return f
-
-
-
-
 
 
 
@@ -717,7 +724,7 @@ class longRangePhase:
 
       self.set_min_ibd_length()
       
-      self.firstPhase=True
+
       self.ibdSegments=set()
       self.ibdSegments_lock = threading.Lock()
       
@@ -829,7 +836,7 @@ class longRangePhase:
       assert len(self.denseIndivs), "Must have at least one individual in the dense panel with genotypes"
 
 
-   def loadGeno(self, fadFileNames = [], tpedFileNames = [], vcfFileNames = [], fad_alleles_and_freq = None):
+   def loadGeno(self, fadFileNames = [], tpedFileNames = [], vcfFileNames = [], fad_alleles_and_freq = None, fad_fam = None):
       """Load input genotypes in any format. Only one fad file can be sensibly given. If giving also 
       vcf or tped files along with fad, must give also fad_alleles."""
       self.indivs = 0
@@ -842,7 +849,7 @@ class longRangePhase:
       
       for fadFileName in fadFileNames:
          printerr("Loading %s"%(fadFileName))
-         self.loadFAD(fadFileName)
+         self.loadFAD(fadFileName, fad_fam)
 
          if fad_alleles_and_freq is not None:
             self.zeroAF = self.estimateZeroAlleleFrequencies()
@@ -908,11 +915,11 @@ class longRangePhase:
 
       if "PL" in format:
          printerr("Reading genotype likelihoods (PL) from the VCF file")
-         np_site_it = ( (site["chrom"],site["pos"]+1, site["ref"], site["alt"][0], 1 - site.get("AF1",2.0), tuple(d[tuple(site[i]["PL"][0])] for i in indivs) ) \
+         np_site_it = ( (site["chrom"],site["pos"]+1, site["ref"], site["alt"][0], 1 - site.get("AF1",2.0), tuple(tuple(site[i]["PL"]) for i in indivs) ) \
                         for site in vcf_sites \
                         if len(site["filter"]) == 0 and len(site["alt"]) == 1 and len(site["alt"][0]) == 1)
-         
-         VCFdata = numpy.fromiter(np_site_it,dtype = [ ("chrom","|S6") ("bpPos",">i8"), ("zeroAllele","|S1"), ("oneAllele","|S1"),("zeroAlleleFrequency",">f8"),("geno_like",">u8",(n_indivs,3))] )
+
+         VCFdata = numpy.fromiter(np_site_it,dtype = [ ("chrom","|S6"), ("bpPos",">i8"), ("zeroAllele","|S1"), ("oneAllele","|S1"),("zeroAlleleFrequency",">f8"),("geno_like",">u8",(n_indivs,3))] )
       else:
          printerr("Reading genotypes (GT) from the VCF file")
          np_site_it = ( (site["chrom"], site["pos"]+1, site["ref"], site["alt"][0], 1 - site.get("AF1",2.0), tuple(d[tuple(site[i]["GT"][0])] for i in indivs) ) \
@@ -1022,7 +1029,7 @@ class longRangePhase:
       new_haplos[:] = 3
       new_haplos[new2old, :self.indivs, : ] = self.haplos
       new_haplos[new2vcf, self.indivs:, : ] = vcfHaplos
-#      pdb.set_trace()
+
 
       new_zAF = numpy.empty(tot_markers, dtype = self.dataType )
       new_zAF[:] = -1.0
@@ -1092,7 +1099,9 @@ class longRangePhase:
       for i in bad_snps:
          bad_mask[i] = False
 
-      self.hLike = new_like[:,bad_mask,:]
+      self.hLike = numpy.ascontiguousarray( new_like[:,bad_mask,:] ).view(ndarray_ADD)
+
+      #self.hLike = new_like[:,bad_mask,:]
       self.haplos = new_haplos[bad_mask,:,:]
       self.markers, self.indivs = self.haplos.shape[:2]
       self.snpPos = uniqPos[bad_mask]
@@ -1181,7 +1190,7 @@ class longRangePhase:
       # Important to save memory
       self.tped = None
             
-   def loadFAD(self, fadFileName):
+   def loadFAD(self, fadFileName, fad_fam_name = None):
       "Load the input file in FAD format"
       def fadFormatter(fad_line):
          fad_line = fad_line.strip().split()
@@ -1192,7 +1201,10 @@ class longRangePhase:
 
       fline = fadFile.readline().strip().split()
       self.indivs = len(fline[1]) / 2
-      self.famInfo.extend("%s_ind%d"%(fadFileName,i) for i in range(self.indivs))
+      if fad_fam_name is None:
+         self.famInfo.extend("%s_ind%d"%(fadFileName,i) for i in range(self.indivs))
+      else:
+         self.famInfo.extend(x.strip().split()[0] for x in open(fad_fam_name) )
       
 
       assert self.snpPos.shape[0] == 0, "FAD must be the first file format to read"
@@ -1276,6 +1288,19 @@ class longRangePhase:
       self.hLike[to_update[0],to_update[1],:] = nLike
       
       self.hLike = numpy.ascontiguousarray(self.hLike)
+
+      # TEST:  Wed 06 Jul 2011 15:44:24 BST
+      # Honestly, this is a bad idea:
+#       printerr("Adding allele frequency prior!")
+#       freq_priors = -numpy.log( numpy.vstack( (self.zeroAF**2,
+#                                                self.zeroAF*(1-self.zeroAF),
+#                                                self.zeroAF*(1-self.zeroAF),
+#                                                (1-self.zeroAF)**2 ) ) )
+#       freq_priors -= freq_priors.min(axis=0)
+
+#       self.hLike += freq_priors.transpose() 
+      # END TEST
+
       self.hLike = self.hLike.view(ndarray_ADD)
 
 
@@ -1711,7 +1736,7 @@ class longRangePhase:
 
 
    def haveIBD(self):
-      return self.ibd_regions is not None
+      return self.ibd_regions is not None 
 
    def ibd_regionsSegmentsToIBD(self):
       "Convert the parsimonious 4 value ibd segment information to IBD file format"
@@ -1785,7 +1810,10 @@ class longRangePhase:
 
 
    def computeLogLikeTable(self):
-      """Compute the log likelihood table to be used in preprocessing"""
+      """Compute the log likelihood table to be used in preprocessing.
+      These are 'pseudo' likelihood ratios, that is
+      P(in ibd state at j | in ibd state at j-1, genotype a , genotype b) / P(non ibd at j| non ibd at j-1 genotype a, genotype b)"""
+      
       # LLtable[marker,genotype1, genotype2]
       # genotypes hom 0, hom 1, het 2
 
@@ -1928,14 +1956,6 @@ class longRangePhase:
    def computeOneIBDnoUpdate(self,indPairs):
       "Compute one forward message passing over pair of individuals on restricted region. Dont update likelihoods."
       printerr('Running child process with id: ', os.getpid())
-      #       cp2pN=self.cp2pN
-      #       ca2p=self.ca2p
-      #       p2ca=self.p2ca
-      #       p2cpN=self.p2cpN
-      #       caj=self.CAj
-      #       cpj=self.CPj
-      #       firstCP2P=self.firstCP2P
-      #       bt=self.backtrack
 
       self._assist_arrays()
 
@@ -1946,16 +1966,8 @@ class longRangePhase:
       firstCP2P=self.firstCP2P
       bt=self._assist.backtrack
       
-      #printerr("Running __computeOneIBDnoUpdate")
 
-      
-      #TODO: Move more stuff to C
-         
       ibdRegions=[]
-
-
-
-            
 
       # This should make a view with ndarray and a copy if using MPI
       if self.hLike.min() < 0.0:
@@ -1966,27 +1978,12 @@ class longRangePhase:
       
       endM=self.markers-1
 
-      # Compile:  Make a dummy pass with no real input to compile the code if necessary.
-#       __indPairs=indPairs
-#       indPairs=[]
-#       self.__lock_inlining()
-#       weave.inline(codeNormBT%{"cType":self.cDataType}, \
-#                    ["bt",'firstCP2P',"hLike","indPairs","ca2p","endM","CPT","ibdRegions"], \
-#                    type_converters=converters.blitz,compiler="gcc",verbose=2,force=False,
-#                    extra_compile_args=["-O3"],support_code="#include<time.h>\n#include<cstdlib>")
-#       indPairs=__indPairs
-#       self.__unlock_inlining()
-      # end compile
       
       indPairs=list(indPairs)
+
       self.c_ext.scan_IBD_hmm(bt,firstCP2P,hLike,indPairs,ca2p,endM,CPT,ibdRegions)
       
-#       weave.inline(codeNormBT%{"cType":self.cDataType}, \
-#                    ["bt",'firstCP2P',"hLike","indPairs","ca2p","endM","CPT","ibdRegions"], \
-#                    type_converters=converters.blitz,compiler="gcc",verbose=2,force=False,
-#                    extra_compile_args=["-O3"],support_code="#include<time.h>\n#include<cstdlib>")
-# #                   type_converters=converters.blitz,compiler="gcc",verbose=2,force=self.firstPhase,extra_compile_args=["-msse2","-ftree-vectorize","-ftree-vectorizer-verbose=0","-g"])
-      self.firstPhase=False
+
 
       ibdRegions = numpy.array(ibdRegions,dtype=int)
       return ibdRegions
@@ -2302,7 +2299,7 @@ class longRangePhase:
          printerr("Returned from locking")
          
 
-      self.firstPhase=False
+
 
       if False and ( ind1,ind2) in ((118,156),(0,52) ):
          def normalize_beliefs(x):
@@ -2726,12 +2723,30 @@ class longRangePhase:
       vcf.setsamples(self.famInfo)
       AFi = pysam.cvcf.FORMAT('AF1',pysam.VCF.NT_NUMBER,1,'Float',"MAP estimate of the site allele frequency of the first ALT allele",'.')
       GTf = pysam.cvcf.FORMAT('GT',pysam.VCF.NT_NUMBER,1,'String','Genotype','.')
-      vcf.setformat({GTf.id:GTf})
+      GPf = pysam.cvcf.FORMAT('GP',pysam.VCF.NT_NUMBER,3,'Integer','Genotype posterior probability (Phred scaled)','.')
+      GQf = pysam.cvcf.FORMAT('GQ',pysam.VCF.NT_NUMBER,1,'Integer','Genotype quality','.')
+      HQf = pysam.cvcf.FORMAT('HQ',pysam.VCF.NT_NUMBER,2,'Integer','Haplotype qualities. For i=1,2  -10log(Probability that i:th allele is wrong)','.')
+      vcf.setformat({GTf.id:GTf,
+                     GPf.id:GPf,
+                     GQf.id:GQf,
+                     HQf.id:HQf})
+      
       vcf.setinfo({AFi.id:AFi})
 
 
       phases = self.callPhases(allow_inferred_genotypes)
 
+      def phredScale(x,cutoff=99):
+         x = -10*numpy.log10(x)
+         x[x>cutoff] = cutoff
+         x = numpy.array(x,dtype=int)
+         return x
+
+      def phredScaleNot(x,cutoff=99,_LOGE10=numpy.log(10.0)):
+         x = -10*numpy.log1p(-x)/_LOGE10
+         x[x>cutoff] = cutoff
+         x = numpy.array(x,dtype=int)
+         return x
 
       def vcfGenerator(phases,poses,alleles,AF,samples):
 
@@ -2739,7 +2754,7 @@ class longRangePhase:
                 "id":".",
                 "qual":".",
                 "filter":None,
-                "format":["GT"] }
+                "format":["GT","GP","GQ","HQ"] }
          if d["chrom"] is None:
             d["chrom"] = "Unkn"
             
@@ -2756,15 +2771,46 @@ class longRangePhase:
          phase_arr = numpy.empty((4,4),dtype=numpy.object)
          for k,v in phase2str.iteritems(): phase_arr[k]=v
 
+         #pdb.set_trace()
 
-         for p,A,f,h in it.izip(poses,alleles,AF,phases):
+         for marker,p,A,f,h in it.izip(it.count(),poses,alleles,AF,phases):
                d["pos"] = p - 1 
                d["info"] = {"AF1":[1.0-f] }
                d["ref"] = A[0]
                d["alt"] = [ A[1] ]
-               d.update((s,dict(GT=phase_arr[g[0],g[1]] )) for s,g in it.izip(samples,h))
+               qual = self.normalizedLike(marker)
+               geno_posterior = numpy.vstack( (qual[:,0], qual[:,1:3].sum(axis=1), qual[:,3])).transpose()
+
+               # Probabilities of genotypes
+               GPs = phredScale(geno_posterior)
+
+               # Probability that call is wrong
+               GQs = phredScaleNot(geno_posterior.max(axis=1))
+               # Probability that first allele is 0
+               Ph0_0 = qual[:,::2].sum(axis=1)
+               Ph0_0p = phredScale(Ph0_0)
+               Ph0_1p = phredScaleNot(Ph0_0)
+               #HQ1 = it.izip(Ph0_0p, phredScale(1.0 - Ph0_0),Ph0_0p, it.repeat(0) )
+               HQ1 = it.izip(Ph0_1p, Ph0_0p,Ph0_1p, it.repeat(0) )
+               # Probability that second allele is 0
+               Ph1_0 = qual[:,:2].sum(axis=1)
+               Ph1_0p = phredScale(Ph1_0)
+               Ph1_1p = phredScaleNot(Ph1_0)
+               #HQ2 = it.izip(phredScale(Ph1_0), Ph1_1p,Ph1_1p, it.repeat(0) )
+               HQ2 = it.izip(Ph1_1p, Ph1_0p,Ph1_0p, it.repeat(0) )
+               
+               
+               d.update((s,dict(GT=phase_arr[g[0],g[1]],
+                                #GL=",".join(map(lambda x:"%g"%(x),numpy.log10(gp))),
+                                GP=list(gp),
+                                GQ=[gq],
+                                HQ=[ hq1[ g[0] ], hq2[ g[1] ] ]
+                                 )) for s,g,gp,gq,hq1,hq2 in it.izip(samples,h,GPs,GQs,HQ1,HQ2))
+                                #GQ=int(-10*numpy.log10(1.0-gp.max())) )) for s,g,gp in it.izip(samples,h,geno_posterior))
+
                yield d
 
+      numpy.seterr(all="ignore")
       phase_strm = vcfGenerator(phases, self.snpPos, self.alleles, self.zeroAF, self.famInfo)
 
       printerr("Openning "+fname)
@@ -2772,6 +2818,7 @@ class longRangePhase:
       vcf.write(outstrm, phase_strm)
       printerr("Closing")
       outstrm.close()
+      numpy.seterr(all="print")
       
 
 
@@ -2785,7 +2832,8 @@ class longRangePhase:
       open(fname,"w").writelines("%s\n"%(x) for x in self.famInfo)
 
    def normalizedLike(self,marker=None):
-      "Return normalized max-margin posteriors ('likelihoods') in range [0-1]"
+      """Return normalized max-margin posteriors ('likelihoods') in range [0-1]
+      The output has shape (indivs,markers,4) if marker == None or (indivs,4) otherwise"""
       if marker is  None:
          tlike = numpy.exp(-self.hLike).transpose((2,0,1))
          tlike /= tlike.sum(axis=0)
@@ -2826,6 +2874,11 @@ class longRangePhase:
       open(outFile,"w").writelines(gen)
       #base%(bpPos,A0,A1) for 
       
+
+   def setPhredThreshold(self,phred_limit):
+      "Set the call threshold from a phred score"
+      callThresholdP = 10.0**(-phred_limit/10.0)
+      self.callThreshold = (1-callThresholdP)/callThresholdP 
 
    def thresholdCalls(self,phases):
       "Remove phase/imputation calls that are supported too weakly"
@@ -2919,9 +2972,9 @@ class longRangePhase:
          hLike = hLike.view(numpy.ma.MaskedArray)
          hLike.fill_value = numpy.finfo(hLike.dtype).max
          hLike.mask = numpy.zeros(hLike.shape, dtype=bool )
-         hLike.mask[self.geno==0] = numpy.array([False, True, True, True],dtype=bool )
-         hLike.mask[self.geno==1] = numpy.array([True, True, True, False],dtype=bool )
-         hLike.mask[self.geno==2] = numpy.array([True, False, False, True],dtype=bool )
+         hLike.mask[(self.geno==0)] = numpy.array([False, True, True, True],dtype=bool )
+         hLike.mask[(self.geno==1)] = numpy.array([True, True, True, False],dtype=bool )
+         hLike.mask[(self.geno==2)] = numpy.array([True, False, False, True],dtype=bool )
 
          
       posCalls = hLike.argmin(axis=2)
@@ -3265,8 +3318,8 @@ class longRangePhase:
       newTime=time.time()
       startTime=newTime
 
-      self.computeGenos()
-      self.computeLogLikeTable()
+      #self.computeGenos()
+      #self.computeLogLikeTable()
       
       if self.poolSize <= 1 or numPairs < 3 * self.poolSize :
          if self.poolSize > 1:
@@ -3313,7 +3366,7 @@ class longRangePhase:
          printerr("Max end",self.ibd_regions["endM"].max())
 
 
-   def LLscan_and_filter(self, coverIndivs = None,otherIndivs = None, min_cover = 15, min_ibd_length = 10):
+   def LLscan_and_filter(self, coverIndivs = None,otherIndivs = None, min_cover = 15, min_ibd_length = 10, site_cover = None):
       "Run the fast score based scan and filtering of plausible IBD segments"
       
       assert self.geno.flags.c_contiguous, "Genotype array must be C-contiguous"
@@ -3345,7 +3398,7 @@ class longRangePhase:
                                                  peakThreshold,
                                                  dipThreshold,
                                                  min_cover,
-                                                 min_ibd_length )
+                                                 min_ibd_length,site_cover )
       else:
          chunkSize = int( len(coverIndivs) * 1.0 / self.poolSize + 1) 
 
@@ -3360,7 +3413,7 @@ class longRangePhase:
                                                                       peakThreshold,
                                                                       dipThreshold,
                                                                       min_cover,
-                                                                      min_ibd_length ), subsetPairs )
+                                                                      min_ibd_length,site_cover ), subsetPairs )
          ibdRegions = numpy.concatenate(ibdRegions)
          ibdRegions = tools.uniqueRows(ibdRegions)
 
@@ -3386,25 +3439,50 @@ class longRangePhase:
       #ibdRegions[:,0]=ibdRegions[:,1]
       #ibdRegions[:,0]=0
       #ibdRegions[:,1]=0
-      printerr( "All pairs took %g mins"%( ( time.time() - startTime ) / 60.0 ))
-      printerr("Using %d found putative IBD regions"%(ibdRegions.shape[0]))
-
-      # Shuffle the update order. This should avoid overcommiting and improve load balancing.
-      numpy.random.shuffle(ibdRegions)
 
 
 
-      myStack = numpy.hstack(( ibdRegions[:,:2], numpy.reshape(ibdRegions[:,4],(-1,1)), ibdRegions[:,2:4], self.snpPos[ibdRegions[:,2:4]]) )
-      self.ibd_regions = numpy.ascontiguousarray(myStack, dtype=numpy.int32)
+      def _append_ibdRegions(ibdRegions):
+         # Shuffle the update order. This should avoid overcommiting and improve load balancing.
 
-      self.ibd_regions = self.ibd_regions.T.view(self.ibd_regions_dtype_int)[0]
+
+
+         myStack = numpy.hstack(( ibdRegions[:,:2], numpy.reshape(ibdRegions[:,4],(-1,1)), ibdRegions[:,2:4], self.snpPos[ibdRegions[:,2:4]]) )
+         ibdRegions = numpy.ascontiguousarray(myStack, dtype=numpy.int32)
+
+         if self.haveIBD():
+            self.ibd_regions = numpy.append(self.ibd_regions,ibdRegions.T.view(self.ibd_regions_dtype_int)[0])
+         else:
+            self.ibd_regions = ibdRegions.T.view(self.ibd_regions_dtype_int)[0]
+         numpy.random.shuffle(self.ibd_regions)
+
+#      pdb.set_trace()
+      _append_ibdRegions(ibdRegions)
 
       if len(self.denseIndivs) < self.indivs:
          # scan also pairs that are covered with something from the dense panel
-         ibdCover = self.ibdCoverCounts()>0
+         ibdCover = self.ibdCoverCounts2().sum(axis=2)>0
          ibdCover = numpy.array(ibdCover,dtype=numpy.int8)
-         
-         
+         ibd_covered_indivs = numpy.nonzero(ibdCover.max(axis=0))[0]
+         sparse_indivs = numpy.setdiff1d(ibd_covered_indivs, self.denseIndivs)
+         ibdRegions = self.LLscan_and_filter(sparse_indivs,sparse_indivs,
+                                             min_cover=min_cover, min_ibd_length = min_ibd_length,
+                                             site_cover = ibdCover)
+         _append_ibdRegions(ibdRegions)
+         within =( (numpy.in1d(self.ibd_regions["ind1"],self.denseIndivs)&
+                    numpy.in1d(self.ibd_regions["ind2"],self.denseIndivs)).sum())
+         outside =( (numpy.in1d(self.ibd_regions["ind1"],sparse_indivs) &
+                     numpy.in1d(self.ibd_regions["ind2"],sparse_indivs)).sum())
+         across = len(self.ibd_regions) - within - outside
+
+         printerr("Plausible IBD segments within dense panel: %d"%(within))
+         printerr("Plausible IBD segments within sparse panel: %d"%(outside))
+         printerr("Plausible IBD segments across panels: %d"%(across))
+
+   
+      printerr( "All pairs took %g mins"%( ( time.time() - startTime ) / 60.0 ))
+      printerr("Using %d found putative IBD regions"%(ibdRegions.shape[0]))
+
 
       if ibdSegmentCalls is not None:
          open(tools.addSuffix(ibdSegmentCalls,".aibd"),"w").writelines("%d\t%d\t%g\t%d\t%d\t%d\t%d\n"%(x[0],x[1],float(x[2]),x[3],x[4],x[5],x[6]) for x in self.ibd_regions)

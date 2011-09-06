@@ -74,10 +74,8 @@ const int G2stride = LLtable_array->strides[2]/sizeof(%(cType)s);
 std::vector<ibd_region_type> ibd_regions;
 std::set<ibd_region_type> out_regions;
 
-/*
-kvek_t(int) ibdRegions;
-kv_init(ibdRegions);
-*/
+
+
 PY_BEGIN_ALLOW_THREADS;
 
 for(int idx1=0; idx1 < Nindivs_to_cover[0]; idx1++) {
@@ -96,11 +94,14 @@ for(int idx1=0; idx1 < Nindivs_to_cover[0]; idx1++) {
     int low_idx = 0, peak_idx = 0;
     int idx = 0;
 #define USE_DECREASE_LIMIT 1
+    int is_covered = 0;
 
     while(LLptr < LLendPtr) {
        value = *(LLptr + (*g1)*G1stride + (*g2)*G2stride);
        cum_value += value;
-
+#ifdef _SITE_FILTER_
+       is_covered|=SITE_COVER2(idx,i1)|SITE_COVER2(idx,i2);
+#endif
 
        if( cum_value > max_value) {
            max_value = cum_value;
@@ -111,7 +112,11 @@ for(int idx1=0; idx1 < Nindivs_to_cover[0]; idx1++) {
 #else
            if( cum_value < 0.0) {
 #endif
-              if(max_value > lowLimit && (peak_idx-low_idx) >= min_length  ) {  // Gone past a high peak
+              if(max_value > lowLimit && (peak_idx-low_idx) >= min_length
+#ifdef _SITE_FILTER_
+              && is_covered
+#endif
+              ) {  // Gone past a high peak
                   //std::cerr<< "High: ";
                   ibd_region_type high_reg;
                   high_reg.i1 = std::min(i1,i2)*2;
@@ -135,6 +140,9 @@ for(int idx1=0; idx1 < Nindivs_to_cover[0]; idx1++) {
                  // Reset peak tracking
                   low_idx = peak_idx = idx;
               }
+#endif
+#ifdef _SITE_FILTER_
+              is_covered = 0;
 #endif
               
               max_value = cum_value = 0.0;
@@ -324,13 +332,24 @@ Py_DECREF(out);
    mod.customize.add_header("<algorithm>")
    mod.customize.add_header("<set>")
    indivs_covering = indivs_to_cover
+   site_cover = numpy.array([[0]],dtype=numpy.int8)
    for cDataType,dataType in (("double",numpy.float64),("float",numpy.float32)):
       LLtable = numpy.zeros((1,3,3),dtype = dataType)
-      func = ext_tools.ext_function('LLscan_and_filter_%s'%(cDataType),
+      func = ext_tools.ext_function('_LLscan_and_filter_%s'%(cDataType),
                                     code%{"cType":cDataType},
                                     ["indivs_to_cover","indivs_covering",
                                      "genos","LLtable", "peakThreshold",
-                                     "dipThreshold","cover_limit","min_length"])
+                                     "dipThreshold","cover_limit",
+                                     "min_length"])
+      mod.add_function(func)
+      func = ext_tools.ext_function('_LLscan_and_filter_site_%s'%(cDataType),
+                                    "#define _SITE_FILTER_ 1\n" +
+                                    code%{"cType":cDataType} +
+                                    "#undef _SITE_FILTER_\n",
+                                    ["indivs_to_cover","indivs_covering",
+                                     "genos","LLtable", "peakThreshold",
+                                     "dipThreshold","cover_limit",
+                                     "min_length","site_cover"])
       mod.add_function(func)
 
 
@@ -1608,7 +1627,11 @@ def build_c_scan_ext():
     """   
     import os.path
     mod = define_c_scan_ext()
-    mod.compile(verbose=2,location = os.path.dirname(__file__))
+    try:
+       mod.compile(verbose=2,location = os.path.dirname(__file__))
+    except Exception,e:
+       tools.printerr(str(e))
+       tools.printerr("Proceeding with your peril!!")
 
 try:
     # FOLLOWING LINE FOR TESTING.
@@ -1633,6 +1656,17 @@ class c_ext:
     def __getattr__(self,attr):
         return getattr(c_scan_ext,attr+"_" + self.cDtype)
     
+
+    def LLscan_and_filter(self,indivs_to_cover,indivs_covering,genos,LLtable,peakThreshold,dipThreshold,cover_limit,min_length,site_cover = None):
+       """Return plausible IBD segments between indivs_to_cover and indivs_covering on genotypes genos. A segment is
+       plausible if the sum of LLtable[g1,g2] scores is over peakThreshold with no decrease of dipThreshold
+       and the segment has at least min_length sites. This is trying hard to find cover_limit, but no more, segments
+       for each site of indivs_to_cover. If site_cover is given, only returns segments that overlap sites with value 1 in site_cover."""
+       if site_cover is None:
+          return self._LLscan_and_filter(indivs_to_cover,indivs_covering,genos,LLtable,peakThreshold,dipThreshold,cover_limit,min_length)
+       else:
+          return self._LLscan_and_filter_site(indivs_to_cover,indivs_covering,genos,LLtable,peakThreshold,dipThreshold,cover_limit,min_length,site_cover)
+          
 
     def IBD_filter(self,ibd_regions,individuals,ibd_limit,ibd_length_limit):
         "Return subset of ibd_regions such that all (most) sites have coverage at least ibd_limit"

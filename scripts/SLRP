@@ -112,6 +112,10 @@ def process_args():
                      help="File to read the allele frequencies from.   [default:%default]",
                      metavar="FILE",default=None
                      )
+   input_opts.add_option("", "--famFile", dest="famFile",
+                     help="Name of the file listing the sample names in the FAD file.  [default:%default]",
+                     metavar="FILE",default=None
+                     )
 
    parser.add_option_group(input_opts)
 
@@ -186,8 +190,12 @@ def process_args():
                      help="Upper limit for probability of noIBD to IBD transition between two markers.  Default taken from population probabililties. [default: 4 * prob_ibd]", metavar="NUM",default=None )
 
    param_opts.add_option("-T", "--CallThreshold", dest="callThreshold",metavar="NUM",
-                     help="Minimum fold difference in posterior probability of two most probable phases to be called.  [default:%default]",
-                     default=2.0,type="float"
+                     help="Minimum fold difference in posterior probability of two most probable phases to be called. If given, takes precedence over phredThreshold.  [default:%default]",
+                     default=None,type="float"
+                     )
+   param_opts.add_option("-P", "--phredThreshold", dest="phredThreshold",metavar="NUM",
+                     help="Minimum phred scaled quality score to call phases.  [default:%default]",
+                     default=10.0,type="float"
                      )
 
    param_opts.add_option("-e", "--genotypingErrRate", dest="errP",type="float",
@@ -389,13 +397,15 @@ def main():
       if mpi_rank == 0:
          rlp.setChromosome(options.chromosome)
          rlp.setErrP(options.errP)
-         rlp.setCallThreshold(options.callThreshold)
+         rlp.setPhredThreshold(options.phredThreshold)
+         if options.callThreshold:
+            rlp.setCallThreshold(options.callThreshold)
          printerr("Reading fad %s"%(",".join(options.fadFile)))
          printerr("Reading tped %s"%(",".join(options.tpedFile)))
          printerr("Reading vcf %s"%(",".join(options.vcfFiles)))
 
          try:
-            rlp.loadGeno( options.fadFile , options.tpedFile, options.vcfFiles ,fad_alleles_and_freq = options.freqFile)
+            rlp.loadGeno( options.fadFile , options.tpedFile, options.vcfFiles ,fad_alleles_and_freq = options.freqFile, fad_fam = options.famFile)
          except IOError,e:
             printerr(str(e))
             return False
