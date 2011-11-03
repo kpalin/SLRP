@@ -38,10 +38,17 @@ except ImportError:
 
 #sys.path.append("/nfs/users/nfs_k/kp5/Kuusamo/scripts/")
 
-import SLRPlib.VCF  
+#import SLRPlib.VCF  
 import SLRPlib.tools as tools
 import SLRPlib.scanTools
 from SLRPlib.tools import printerr
+
+try:
+   from pysam import cvcf as VCFmod
+   printerr("Imported VCF library from pysam. It's probably fast but possibly incompatible.")
+except ImportError,e:
+   import SLRPlib.VCF as VCFmod
+   printerr("Imported VCF library from SLRPlib. It's slow but will do the trick.")
 
 def handler(signum, frame):
    raise KeyboardInterrupt("Job is being terminated")
@@ -881,7 +888,7 @@ class longRangePhase:
 
    def loadVCF(self, vcfFileName):
       "Load VCF file using the parser taken from pysam 0.5"
-      vcfFile = SLRPlib.VCF.VCF()
+      vcfFile = VCFmod.VCF()
       vcf_sites = vcfFile.parse(open(vcfFileName))
 
       info = vcfFile.getinfo()
@@ -944,47 +951,6 @@ class longRangePhase:
 
 
 
-         
-   def loadVCF_dummy(self, vcfFileName):
-      "Load VCF file with genotype likelihoods. Assume single chromosome with biallelic snps. VCF file must have PL filed with List of Phred-scaled genotype likelihoods, number of values is (#ALT+1)*(#ALT+2)/2"
-
-      vcfFile = open(vcfFileName)
-      magicLine = vcfFile.readline().strip()
-      if magicLine != "##fileformat=VCFv4.1":
-         printerr("Your VCF file has %s, which might cause trouble. I'm only prepared for VCFv4.1 (ish)."%(magicLine))
-
-      vcfHeader = list(tools.takewhile2(lambda x:x[:6]!="#CHROM",vcfFile))
-      #vcfFile = it.dropwhile(lambda x:x[:6]!="#CHROM",vcfFile)
-      CHROMline = vcfHeader[-1].strip().split()
-      indivs = CHROMline[9:]
-      n_indivs = len(indivs)
-
-      if self.chrom is None:
-         VCFlines = (x.split() for x in vcfFile if x[0]!="#")
-      else:
-         __chr = self.chrom
-         VCFlines = (x.split() for x in vcfFile if x[0]==__chr)
-         
-      def parseVCFsite(vcf_rec):
-         PLidx = vcf_rec[8].split(":").index("PL")
-         
-         #r = [int(vcf_rec[1])]
-         PL=[]
-         for s_rec in vcf_rec[9:]:
-            PL.append(tuple(map(int,s_rec.split(":")[PLidx].split(","))))
-         return (int(vcf_rec[1]),vcf_rec[3],vcf_rec[4], tuple(PL))
-
-      #VCFsites = it.chain(*(parseVCFsite(x)    for x in VCFlines if x[6]=="PASS"))
-      VCFsites = (parseVCFsite(x)    for x in VCFlines if x[6] in (".","PASS") )
-
-      VCFdata = numpy.fromiter(VCFsites,dtype = [ ("bpPos",">i8"), ("zeroAllele","|S1"), ("oneAllele","|S1"),("geno_like",">i8",(n_indivs,3))] )
-      #VCFdata = numpy.fromiter(VCFsites,dtype = [ ("bpPos",">i8"), ("geno_like",">i8",(n_indivs,3))] )
-      #VCFdata = numpy.fromiter(VCFsites,dtype = [ ("bpPos",">i8"), ("zeroAllele","|S1"), ("oneAllele","|S1")] )
-      #VCFdata = numpy.fromiter(VCFsites,dtype =">i8" )
-      #VCFdata = VCFdata.view([ ("bpPos",">i8"), ("geno_like",">i8",(n_indivs,3))] )
-
-      self.add_observations(VCFdata,indivs)
-
    def add_observations(self,VCFdata,indivs):
       "Add loaded VCF data array to already loaded set of geno/haplotype observations"
       n_markers = len(VCFdata)
@@ -1031,7 +997,7 @@ class longRangePhase:
       new_haplos[new2vcf, self.indivs:, : ] = vcfHaplos
 
 
-      new_zAF = numpy.empty(tot_markers, dtype = self.dataType )
+      new_zAF = numpy.empty(tot_markers, dtype = float )
       new_zAF[:] = -1.0
       try:
          new_zAF[ new2old ] = self.zeroAF
@@ -1156,13 +1122,21 @@ class longRangePhase:
       
       tpedMarkers = self.tped.shape[0]
 
-      tpedAlleles = numpy.fromiter((numpy.intersect1d(x,"ACGT") for x in self.tped["haplos"]),dtype=[('zero',"|S1"),('one',"|S1")])
-      tpedAlleles[tpedAlleles["one"]==""] = "."
+      tpedAlleles = numpy.fromiter((numpy.intersect1d(x,"ACGT12") for x in self.tped["haplos"]),dtype=[('zero',"|S1"),('one',"|S1")])
       self.alleles = tpedAlleles.view("|S1")
       self.alleles.shape = (tpedMarkers, 2)
       numAlleles = tpedAlleles.view("int8")
       numAlleles.shape = (tpedMarkers,2)
 
+      
+
+      allMissing = (tpedAlleles["zero"]=='')
+      if allMissing.any():
+         printerr("Following sites have only missing values in tped file:")
+         printerr("\n".join("\t".join(map(str,it.takewhile(lambda x:not isinstance(x,numpy.ndarray),iter(t)))) for t in self.tped[allMissing]))
+         raise IOError("Sites with completely missing genotypes in tped file")
+
+      tpedAlleles[tpedAlleles["one"]==""] = "."
 
       hapView = self.tped["haplos"].view("int8")
       hapView.shape = (tpedMarkers,self.indivs,2)
@@ -1176,8 +1150,20 @@ class longRangePhase:
          self.haplos[numpy.logical_and(notHets[:,i],numAlleles[:,0] == hapView[:,i,0]),i,:] = 0
          self.haplos[numpy.logical_and(notHets[:,i],numAlleles[:,1] == hapView[:,i,0]),i,:] = 1
 
-      assert self.haplos.var(axis=2).max()==0.0
 
+      varM = self.haplos.var(axis=0)
+      assert varM.var(axis=1).max() == 0.0, "There shouldn't be any haplotype information from tped file!"
+      if varM[:,0].min() < 2*numpy.finfo(float).eps:
+         printerr("Be aware!! Following individuals are pretty much completely homozygous:\n"+"\n".join(tfam[i] for i in range(len(tfam)) if varM[i,0] < 2*numpy.finfo(float).eps))
+
+      varM = self.haplos[:,:,0].var(axis=1)
+      if varM.min() < 2*numpy.finfo(float).eps:
+         
+         printerr("Be aware!! Following sites are monomorphic:")
+         printerr("\n".join("\t".join(map(str,it.takewhile(lambda x:not isinstance(x,numpy.ndarray),iter(t)))) for t in self.tped[varM<2*numpy.finfo(float).eps]))
+      
+
+      
       self.markers = tpedMarkers
       self.snpPos = self.tped["bpPos"].copy()
       if self.tped["cmPos"].var() == 0:
@@ -2716,16 +2702,15 @@ class longRangePhase:
 
    def writeVCF(self,fname,allow_inferred_genotypes=False):
       "Write current information (haplotypes, Alleles and frequencies, ..)  to a file in VCF format"
-      #import pysam
-      vcf = SLRPlib.VCF()
+      vcf = VCFmod.VCF()
       
       vcf.setheader([("source","SLRP-%s"%(__version__) )])
       vcf.setsamples(self.famInfo)
-      AFi = SLRPlib.VCF.FORMAT('AF1',vcf.NT_NUMBER,1,'Float',"MAP estimate of the site allele frequency of the first ALT allele",'.')
-      GTf = SLRPlib.VCF.FORMAT('GT',vcf.NT_NUMBER,1,'String','Genotype','.')
-      GPf = SLRPlib.VCF.FORMAT('GP',vcf.NT_NUMBER,3,'Integer','Genotype posterior probability (Phred scaled)','.')
-      GQf = SLRPlib.VCF.FORMAT('GQ',vcf.NT_NUMBER,1,'Integer','Genotype quality','.')
-      HQf = SLRPlib.VCF.FORMAT('HQ',vcf.NT_NUMBER,2,'Integer','Haplotype qualities. For i=1,2  -10log(Probability that i:th allele is wrong)','.')
+      AFi = VCFmod.FORMAT('AF1',vcf.NT_NUMBER,1,'Float',"MAP estimate of the site allele frequency of the first ALT allele",'.')
+      GTf = VCFmod.FORMAT('GT',vcf.NT_NUMBER,1,'String','Genotype','.')
+      GPf = VCFmod.FORMAT('GP',vcf.NT_NUMBER,3,'Integer','Genotype posterior probability (Phred scaled)','.')
+      GQf = VCFmod.FORMAT('GQ',vcf.NT_NUMBER,1,'Integer','Genotype quality','.')
+      HQf = VCFmod.FORMAT('HQ',vcf.NT_NUMBER,2,'Integer','Haplotype qualities. For i=1,2  -10log(Probability that i:th allele is wrong)','.')
       vcf.setformat({GTf.id:GTf,
                      GPf.id:GPf,
                      GQf.id:GQf,
