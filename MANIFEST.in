@@ -1,0 +1,5 @@
+include SLRPlib/*.py
+include scripts/SLRP
+include setup.py README.txt
+include examples/*
+exclude SLRPlib/koe.py SLRPlib/alt.py
