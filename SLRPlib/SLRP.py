@@ -1007,10 +1007,10 @@ class longRangePhase:
 
       if "geno_like" in VCFdata.dtype.fields:
          vcfLike = numpy.empty((n_indivs,n_markers,4),dtype = self.dataType)
-         vcfLike[:,:,0] = 0.1*VCFdata["geno_like"][:,:,0].T/numpy.log(10.0)
-         vcfLike[:,:,1] = 0.1*VCFdata["geno_like"][:,:,1].T/numpy.log(10.0) - numpy.log(0.5)  # Split the het likelihood to the two phases
+         vcfLike[:,:,0] = 0.1*VCFdata["geno_like"][:,:,0].T/numpy.log10(numpy.e)
+         vcfLike[:,:,1] = 0.1*VCFdata["geno_like"][:,:,1].T/numpy.log10(numpy.e)
          vcfLike[:,:,2] = vcfLike[:,:,1] 
-         vcfLike[:,:,3] = 0.1*VCFdata["geno_like"][:,:,2].T/numpy.log(10.0)
+         vcfLike[:,:,3] = 0.1*VCFdata["geno_like"][:,:,2].T/numpy.log10(numpy.e)
 
          new_like[self.indivs:, new2vcf,:] = vcfLike
 
