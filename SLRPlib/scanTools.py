@@ -1612,9 +1612,9 @@ def define_c_scan_ext():
     add_scan_IBD_hmm(mod)
     
     #pdb.set_trace()
-    mod.customize.add_extra_compile_arg("-g")
+    #mod.customize.add_extra_compile_arg("-g")
     mod.customize.add_extra_compile_arg("-Wall")
-    #mod.customize.add_extra_compile_arg("-O3")
+    mod.customize.add_extra_compile_arg("-O3")
     #mod.customize.add_extra_compile_arg("-ftree-vectorizer-verbose=3")
     mod.customize.add_extra_compile_arg("-DNIBDFILTERDEBUG")
     mod.customize.add_extra_compile_arg("-DNDEBUG")

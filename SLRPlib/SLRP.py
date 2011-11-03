@@ -2716,16 +2716,16 @@ class longRangePhase:
 
    def writeVCF(self,fname,allow_inferred_genotypes=False):
       "Write current information (haplotypes, Alleles and frequencies, ..)  to a file in VCF format"
-      import pysam
-      vcf = pysam.VCF()
+      #import pysam
+      vcf = SLRPlib.VCF()
       
       vcf.setheader([("source","SLRP-%s"%(__version__) )])
       vcf.setsamples(self.famInfo)
-      AFi = pysam.cvcf.FORMAT('AF1',pysam.VCF.NT_NUMBER,1,'Float',"MAP estimate of the site allele frequency of the first ALT allele",'.')
-      GTf = pysam.cvcf.FORMAT('GT',pysam.VCF.NT_NUMBER,1,'String','Genotype','.')
-      GPf = pysam.cvcf.FORMAT('GP',pysam.VCF.NT_NUMBER,3,'Integer','Genotype posterior probability (Phred scaled)','.')
-      GQf = pysam.cvcf.FORMAT('GQ',pysam.VCF.NT_NUMBER,1,'Integer','Genotype quality','.')
-      HQf = pysam.cvcf.FORMAT('HQ',pysam.VCF.NT_NUMBER,2,'Integer','Haplotype qualities. For i=1,2  -10log(Probability that i:th allele is wrong)','.')
+      AFi = SLRPlib.VCF.FORMAT('AF1',vcf.NT_NUMBER,1,'Float',"MAP estimate of the site allele frequency of the first ALT allele",'.')
+      GTf = SLRPlib.VCF.FORMAT('GT',vcf.NT_NUMBER,1,'String','Genotype','.')
+      GPf = SLRPlib.VCF.FORMAT('GP',vcf.NT_NUMBER,3,'Integer','Genotype posterior probability (Phred scaled)','.')
+      GQf = SLRPlib.VCF.FORMAT('GQ',vcf.NT_NUMBER,1,'Integer','Genotype quality','.')
+      HQf = SLRPlib.VCF.FORMAT('HQ',vcf.NT_NUMBER,2,'Integer','Haplotype qualities. For i=1,2  -10log(Probability that i:th allele is wrong)','.')
       vcf.setformat({GTf.id:GTf,
                      GPf.id:GPf,
                      GQf.id:GQf,

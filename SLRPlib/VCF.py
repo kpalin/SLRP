@@ -47,7 +47,7 @@ from collections import namedtuple, defaultdict
 from operator import itemgetter
 import sys, re, copy, bisect
 
-import pysam
+#import pysam
 
 gtsRegEx = re.compile("[|/\\\\]")
 alleleRegEx = re.compile('^[ACGTN]+$')

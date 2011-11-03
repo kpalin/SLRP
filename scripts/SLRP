@@ -240,7 +240,7 @@ def process_args():
    comp_opts.add_option("", "--IBDcoverLimit", dest="ibdCoverLimit",type="int",
                      help="""Soft lower limit for number of IBD sharing. Only do message passing on the longest NUM segments
                      covering a locus. The selection is greedy, hence there might be more than minimum number of segments used.
-                     For large number of individuals, 10 might be a good value. Non positive value turn off this limit. [default: %default]""", metavar="NUM",default=-1 )
+                     For large number of individuals, 10 might be a good value. Non positive value turn off this limit. [default: %default]""", metavar="NUM",default=15 )
 
    comp_opts.add_option("", "--minIBDlength", dest="minIBDlength",type="int",
                      help="Hard lower limit for length of IBD segment in markers. This should speed up computation by disregarding uninformative IBS segments. [default: %default]",
