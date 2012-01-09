@@ -36,7 +36,31 @@ import pdb
 #from simuPop_utils import *
 
 
+def numpyScipyOK():
+   "Return true if scipy and numpy versions are high enough."
+   import re
+   try:
+      import numpy
+   except ImportError:
+      return False
+   try:
+      import scipy
+   except ImportError:
+      return False
 
+   parts = numpy.__version__.split(".")
+   major,minor = int(parts[0]),int(parts[1])
+   if not (major>1 or (major == 1 and minor >= 4)):
+      return False
+
+
+   parts = scipy.__version__.split(".")
+   major,minor = int(parts[0]),int(parts[1])
+   if not (major>0 or (major == 0 and minor >= 8)): # Not certain this is stringent enough!
+      return False
+
+   return True
+   
 
 def writeOptions(opts,outstrm=sys.stdout,outFmt="%(optName)s: %(optValue)s\n"):
    "Write set option values"
@@ -327,6 +351,10 @@ def main():
    global printerr
    from SLRPlib import SLRP
    import os.path
+
+   if not numpyScipyOK():
+      printerr("Your numpy and scipy package versions are outdated. Please updated to at least numpy 1.4 and scipy 0.9.")
+      return
 
    if False and options.outFile is None:
       printerr("Nothing to store, nothing to do..")
