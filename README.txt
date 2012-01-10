@@ -6,6 +6,9 @@ et.al. 2008 (Nature Genetics) and this is a novel probabilistic
 formulation by Kimmo Palin and Richard Durbin (of the Wellcome Trust
 Sanger Institute)
 
+
+For documentation, please consult wiki at http://github.org/kpalin/SLRP/wiki
+
 The SLRP phasing model and this implementation was described in 
 
 Palin, K., Campbell, H., Wright, A. F., Wilson, J. F. and Durbin,
