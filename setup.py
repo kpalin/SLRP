@@ -2,9 +2,10 @@
 
 from distutils.core import setup
 import subprocess as sp
+import os
 
 try:
-    git_proc = sp.Popen(["git","describe"],stdout=sp.PIPE)
+    git_proc = sp.Popen(["git","describe"],stdout=sp.PIPE,stderr=open(os.devnull,"w"))
     git_version = git_proc.stdout.read().strip()
     git_proc.wait()
     if git_proc.returncode == 0:
