@@ -627,7 +627,7 @@ class VCF:
                     self.error(line,self.MISSING_INDEL_ALLELE_REF_BASE)
 
         # trim trailing bases in alleles
-        for i in range(1,min(len(ref),min(map(len,alt)))):
+        for i in range(1,min(len(ref),min(map(len,[""]+alt)))):
             if len(set(allele[-1].upper() for allele in alt)) > 1 or ref[-1].upper() != alt[0][-1].upper():
                 break
             ref, alt = ref[:-1], [allele[:-1] for allele in alt]
