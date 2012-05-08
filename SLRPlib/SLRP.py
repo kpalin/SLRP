@@ -3317,7 +3317,6 @@ class longRangePhase:
          printerr("Chunks of size",chunkSize)
          #subsetPairs=list( list(it.islice(allPairs,chunkSize))  for i in range(0, numPairs, chunkSize) )
          subsetPairs=[allPairs[i:(i+chunkSize),:] for i in range(0, numPairs, chunkSize) ]
-         
          printerr("subsets",len(subsetPairs),[len(x) for x in subsetPairs])
          ibdRegions = self.pmap(self.computeOneIBDnoUpdate, subsetPairs )
          ibdRegions = numpy.concatenate(ibdRegions)
@@ -3390,6 +3389,7 @@ class longRangePhase:
          subsetPairs=[(i,min(len(coverIndivs),i+chunkSize)) for i in range(0, len(coverIndivs), chunkSize) ]
          
          printerr("Chunks of size",chunkSize)
+         self.set_workers(1)
          printerr("subsets",len(subsetPairs),subsetPairs)
          ibdRegions = self.pmap(lambda x:self.c_ext.LLscan_and_filter(coverIndivs[x[0]:x[1]],otherIndivs,
                                                                       self.geno,
@@ -3425,13 +3425,16 @@ class longRangePhase:
       #ibdRegions[:,1]=0
 
 
-
       def _append_ibdRegions(ibdRegions):
          # Shuffle the update order. This should avoid overcommiting and improve load balancing.
 
+         c = ibdRegions[:,4].copy()
+         c.shape = ( len(c),1)
+         myStack = numpy.hstack(( ibdRegions[:,:2], c, ibdRegions[:,2:4], self.snpPos[ibdRegions[:,2:4]]) )
 
-
-         myStack = numpy.hstack(( ibdRegions[:,:2], numpy.reshape(ibdRegions[:,4],(-1,1)), ibdRegions[:,2:4], self.snpPos[ibdRegions[:,2:4]]) )
+         # This line has a c level bug in numpy on numpy.reshape with view of ibdRegions.
+         #myStack = numpy.hstack(( ibdRegions[:,:2], numpy.reshape(ibdRegions[:,4],(-1,1)), ibdRegions[:,2:4], self.snpPos[ibdRegions[:,2:4]]) )
+         
          ibdRegions = numpy.ascontiguousarray(myStack, dtype=numpy.int32)
 
          if self.haveIBD():

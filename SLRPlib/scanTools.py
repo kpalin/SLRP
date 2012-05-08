@@ -1063,17 +1063,20 @@ def add_processAllocedIBD(mod):
     std::cout<<"function: "<<__func__<<std::endl;
 #endif
 
-    int ij,j;
-    int h0,h1,p,p1;
+    // Shared
     const int ibd_chunks = Nind1firstHaplo[0];
     const int num_markers = NhLike[1];
-    const int num_indivs = NhLike[0];
+
+
+    // Private
     %(cType)s old_p2h[2][4];
-    double sum_sq_err,tot_sum_sq_err = 0.0;
-    unsigned int tot_markers_err = 0;
-    
     %(cType)s p2p[num_markers+1][5];
     %(cType)s p2pP[num_markers+1][5];
+    // Reduced to sum
+    double tot_sum_sq_err = 0.0;
+
+
+
 
     // Trickery needed to send array of objects to ext_tools
 #undef P2H12
@@ -1087,7 +1090,7 @@ def add_processAllocedIBD(mod):
 #define CPT(marker,pPrev,pNext,h0,h1) (*((%(cType)s*)(CPT_array->data + (marker)*SCPT[0] + (pPrev)*SCPT[1] + (pNext)*SCPT[2] + (h0)*SCPT[3] + (h1)*SCPT[4]   )))
 
     Py_BEGIN_ALLOW_THREADS;
-
+// THIS IS UNTESTED: #pragma omp parallel for private(p2p,p2pP,old_p2h) firstprivate(tot_sum_sq_err) schedule(dynamic) reduction(+:tot_sum_sq_err)
     for(int ibd_idx = 0; ibd_idx < ibd_chunks; ibd_idx++) {
         const int endM = ENDMARKER1(ibd_idx);
         const int beginM = BEGINMARKER1(ibd_idx);
@@ -1104,7 +1107,7 @@ def add_processAllocedIBD(mod):
        conversion_numpy_check_type( p2h1_array_ind ,%(pyCtype)s, "p2h1_array_ind"); 
        conversion_numpy_check_type( p2h2_array_ind ,%(pyCtype)s, "p2h2_array_ind"); 
 #endif
-        sum_sq_err = 0.0;
+        double sum_sq_err = 0.0;
         
         // Forward
         
@@ -1137,7 +1140,7 @@ def add_processAllocedIBD(mod):
                        for(int h0=0;h0<4;h0++) {
                          // From diplotype 1 to p
                          const %(cType)s h12p_V =  HLIKE3(ind1,j,h0) - P2H1(ij,h0);  //h12ca(ij,h0);
-                         for(h1=0;h1<4;h1++) {
+                         for(int h1=0;h1<4;h1++) {
                             // From diplotype 2 to p
                             const %(cType)s h22p_V =  HLIKE3(ind2,j,h1) - P2H2(ij,h1);  //h22ca(ij,h1);
                             const %(cType)s CPT_V = CPT(j, p0 ,p,h0,h1) ;
@@ -1612,9 +1615,10 @@ def define_c_scan_ext():
     add_scan_IBD_hmm(mod)
     
     #pdb.set_trace()
-    #mod.customize.add_extra_compile_arg("-g")
+    mod.customize.add_extra_compile_arg("-g")
+    mod.customize.add_extra_compile_arg("-O0")
     mod.customize.add_extra_compile_arg("-Wall")
-    mod.customize.add_extra_compile_arg("-O3")
+    #mod.customize.add_extra_compile_arg("-O3")
     #mod.customize.add_extra_compile_arg("-ftree-vectorizer-verbose=3")
     mod.customize.add_extra_compile_arg("-DNIBDFILTERDEBUG")
     mod.customize.add_extra_compile_arg("-DNDEBUG")
