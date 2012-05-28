@@ -3389,7 +3389,6 @@ class longRangePhase:
          subsetPairs=[(i,min(len(coverIndivs),i+chunkSize)) for i in range(0, len(coverIndivs), chunkSize) ]
          
          printerr("Chunks of size",chunkSize)
-         self.set_workers(1)
          printerr("subsets",len(subsetPairs),subsetPairs)
          ibdRegions = self.pmap(lambda x:self.c_ext.LLscan_and_filter(coverIndivs[x[0]:x[1]],otherIndivs,
                                                                       self.geno,

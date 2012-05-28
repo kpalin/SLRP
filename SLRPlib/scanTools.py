@@ -1615,10 +1615,10 @@ def define_c_scan_ext():
     add_scan_IBD_hmm(mod)
     
     #pdb.set_trace()
-    mod.customize.add_extra_compile_arg("-g")
-    mod.customize.add_extra_compile_arg("-O0")
-    mod.customize.add_extra_compile_arg("-Wall")
-    #mod.customize.add_extra_compile_arg("-O3")
+    #mod.customize.add_extra_compile_arg("-g")
+    #mod.customize.add_extra_compile_arg("-O0")
+    #mod.customize.add_extra_compile_arg("-Wall")
+    mod.customize.add_extra_compile_arg("-O3")
     #mod.customize.add_extra_compile_arg("-ftree-vectorizer-verbose=3")
     mod.customize.add_extra_compile_arg("-DNIBDFILTERDEBUG")
     mod.customize.add_extra_compile_arg("-DNDEBUG")
@@ -1631,15 +1631,12 @@ def build_c_scan_ext():
     """   
     import os.path
     mod = define_c_scan_ext()
-    try:
-       mod.compile(verbose=2,location = os.path.dirname(__file__))
-    except Exception,e:
-       tools.printerr(str(e))
-       tools.printerr("Proceeding with your peril!!")
+    mod.compile(verbose=2,location = os.path.dirname(__file__))
+
 
 try:
     # FOLLOWING LINE FOR TESTING.
-    build_c_scan_ext()
+    #build_c_scan_ext()
     import c_scan_ext
 except ImportError:
     build_c_scan_ext()

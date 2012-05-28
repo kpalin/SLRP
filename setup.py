@@ -30,3 +30,7 @@ setup(name='SLRP',
       scripts=['scripts/SLRP'],
       license="GPLv2 or greater",
      )
+
+# This will fail if you can't build c_scan_ext.so
+import SLRPlib.scanTools
+
