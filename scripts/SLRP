@@ -1,4 +1,4 @@
-#!/usr/bin/env python-2.7
+#!/usr/bin/env python
 "Software for Systematic Long Range Phasing by Message Passing"
 # Dependence on python 2.5
 from __future__ import with_statement
@@ -16,12 +16,14 @@ from __future__ import with_statement
 #pylint: disable-msg-cat=C
 
 
+import sys
 
+if not (sys.version_info[0] == 2 and sys.version_info[1] >= 5 ):
+    raise Exception("Unsuppported python interpreter version. Please use python 2.7." )
 
 from SLRPlib import tools
 tools.setup_post_mortem()
 
-import sys
 
 from SLRPlib.tools import printerr,addSuffix
 
