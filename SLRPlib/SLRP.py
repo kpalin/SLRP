@@ -1041,7 +1041,7 @@ class longRangePhase:
             new_alleles[new2vcf[i]] = a
             continue
          elif (a[::-1] == new_alleles[new2vcf[i]] ).all() \
-                  or ( a[1] == WC.get(new_alleles[new2vcf[i]][0], None) and a[0] == WC(new_alleles[new2vcf[i]][1], None) ):
+                  or ( a[1] == WC.get(new_alleles[new2vcf[i]][0], None) and a[0] == WC.get(new_alleles[new2vcf[i]][1], None) ):
             if ( a[1] == WC.get(new_alleles[new2vcf[i]][0], None) and a[0] == WC.get(new_alleles[new2vcf[i]][1], None) ):
                new_alleles[new2vcf[i],0] = WC[a[1]]
                new_alleles[new2vcf[i],1] = WC[a[0]]
