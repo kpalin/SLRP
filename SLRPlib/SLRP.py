@@ -43,12 +43,9 @@ import SLRPlib.tools as tools
 import SLRPlib.scanTools
 from SLRPlib.tools import printerr
 
-try:
-   from pysam import cvcf as VCFmod
-   printerr("Imported VCF library from pysam. It's probably fast but possibly incompatible.")
-except ImportError,e:
-   import SLRPlib.VCF as VCFmod
-   printerr("Imported VCF library from SLRPlib. It's slow but will do the trick.")
+import SLRPlib.VCF as VCFmod
+printerr("Imported VCF library from SLRPlib. It's slow but will do the trick.")
+
 
 def handler(signum, frame):
    raise KeyboardInterrupt("Job is being terminated")
@@ -889,6 +886,7 @@ class longRangePhase:
    def loadVCF(self, vcfFileName):
       "Load VCF file using the parser taken from pysam 0.5"
       vcfFile = VCFmod.VCF()
+      vcfFile.ignoreerror("ERROR_FORMAT_NOT_NUMERICAL")
       vcf_sites = vcfFile.parse(open(vcfFileName))
 
       info = vcfFile.getinfo()
