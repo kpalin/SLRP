@@ -1220,6 +1220,7 @@ class longRangePhase:
 
       indivsWithoutPhase = numpy.where(self.haplos.var(axis=2).max(axis=0) == 0.0)[0]
       if len(indivsWithoutPhase) > 0 :
+	 #TODO: Ensure there are enough hets to break the symmtery.
          breakableSNPs = numpy.where(self.haplos[trimLength:,:,0].transpose()==2)
          break_marker_indiv = numpy.array([hets.next() for (i,hets) in it.groupby(it.izip(*breakableSNPs),lambda x:x[0])],dtype=int)
          break_marker_indiv[:,1]+=trimLength
@@ -2536,9 +2537,10 @@ class longRangePhase:
       #self.setDamping(0.0)
       __dampF = 0.0
 
-      sOrder = allocedIBD.argsort(order=["endMarker"])[::-1]
-      allocedIBD = allocedIBD[sOrder]
-      sOrder = allocedIBD.argsort(order=["beginMarker"])
+      #sOrder = allocedIBD.argsort(order=["endMarker"])[::-1]
+      #allocedIBD = allocedIBD[sOrder]
+      #sOrder = allocedIBD.argsort(order=["beginMarker"])
+      sOrder = allocedIBD["beginMarker"].argsort()
       allocedIBD = allocedIBD[sOrder]
       #def duck_punch_callCurIBD():
       #   import SLRPlib.alt
@@ -3468,7 +3470,7 @@ class longRangePhase:
       printerr("Using %d found putative IBD regions"%(ibdRegions.shape[0]))
 
 
-      if ibdSegmentCalls is not None:
+      if ibdSegmentCalls is not None and len(self.ibd_regions)>0:
          open(tools.addSuffix(ibdSegmentCalls,".aibd"),"w").writelines("%d\t%d\t%g\t%d\t%d\t%d\t%d\n"%(x[0],x[1],float(x[2]),x[3],x[4],x[5],x[6]) for x in self.ibd_regions)
          printerr("Max end",self.ibd_regions["endM"].max())
 
@@ -3620,7 +3622,8 @@ class longRangePhase:
 
 
          #allocedIBD.sort(key = lambda x:(x[2],-x[3]))
-         newIBD.sort(order = [ "beginMarker","endMarker"] )  # TODO: Check results!! sort order is different from the list version
+         #newIBD.sort(order = [ "beginMarker","endMarker"] )  # TODO: Check results!! sort order is different from the list version
+	 newIBD=newIBD[numpy.lexsort((newIBD["beginMarker"],newIBD["endMarker"]))] # TODO: Check results!! sort order is different from the list version
 
          #aIBD = allocedIBD
          old_aIBD_len = len(allocedIBD)
