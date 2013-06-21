@@ -1668,7 +1668,8 @@ class longRangePhase:
                                                      self.snpCMpos[-1] - self.snpCMpos[0]))
       assert self.snpPos[-1] - self.snpPos[0]+1 > 0, "Non positive physical chromosome length"
       assert self.snpCMpos[-1]- self.snpCMpos[0] > 0, "Non positive genetic chromosome length"
-      
+      assert numpy.diff(self.snpPos) > 0, "Non positive physical distance between markers"
+      assert numpy.diff(self.snpCMpos) > 0, "Non positive genetic distance between markers (Are you using correct genetic map?)"
 
       
 
