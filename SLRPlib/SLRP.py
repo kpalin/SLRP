@@ -1708,13 +1708,7 @@ class longRangePhase:
    def loadIBD(self, ibdFileName):
       "Load precalculated IBD file (in separate thread)"
 
-      
-      #self.ibd_regionsLoader = threading.Thread(target = self.__loadIBDthread,
-#                                          name = "IBD load",
-#                                          args = (ibdFileName,))
-
-      #self.ibd_regionsLoader.start()
-      
+          
       self.ibd_regions = numpy.loadtxt( ibdFileName, dtype = self.ibd_regions_dtype )
 
 
@@ -1729,13 +1723,11 @@ class longRangePhase:
       if len(self.ibdSegments) > 0:  # DANGER!!! over writes the input ibd data
          printerr("Setting ibd_regions")
          printerr("Starting:",time.asctime())
-#          self.ibd_regions = numpy.array( [(x[0], x[1], self.snpCMpos[x[3]] - self.snpCMpos[x[2]],
-#                                      x[2],x[3], self.snpPos[x[2]], self.snpPos[x[3]] ) for x in self.ibdSegments],
-#                                    dtype = self.ibd_regions_dtype)
          self.ibd_regions = numpy.fromiter( ((x[0], x[1], self.snpCMpos[x[3]] - self.snpCMpos[x[2]],
                                         x[2],x[3], self.snpPos[x[2]], self.snpPos[x[3]] ) for x in self.ibdSegments),
                                       dtype = self.ibd_regions_dtype,
                                       count = len(self.ibdSegments))
+         self.ibd_regions = numpy.unique(self.ibd_regions)
          printerr("Done:",time.asctime())
       else:
          # Should do something intelligent, e.g. warn that couldn't find any IBD segments.
@@ -2535,23 +2527,11 @@ class longRangePhase:
       my_ibdSegments = array("l") # long
 
       __dampF = self.dampF
-      #self.setDamping(0.0)
       __dampF = 0.0
 
-      #sOrder = allocedIBD.argsort(order=["endMarker"])[::-1]
-      #allocedIBD = allocedIBD[sOrder]
-      #sOrder = allocedIBD.argsort(order=["beginMarker"])
       sOrder = allocedIBD["beginMarker"].argsort()
       allocedIBD = allocedIBD[sOrder]
-      #def duck_punch_callCurIBD():
-      #   import SLRPlib.alt
-      #   reload(SLRPlib.alt)
-      #   import types
-      #   self.callCurIBD = types.MethodType(SLRPlib.alt.callCurIBD_alt,self)
-
-      #duck_punch_callCurIBD()
-      #_something = False
-      
+       
       while  repeat<iterations:
 
          start_repeat_time=time.time()
@@ -2663,6 +2643,7 @@ class longRangePhase:
       if len(my_ibdSegments) > 0 :
          my_ibdSegments = numpy.array(my_ibdSegments,dtype=int).reshape((-1,4) )
          self.ibdSegments_lock.acquire()
+         # We might get short duplicate IBD regions here if the prescan gave regions very close to each other. Fix in output.
          self.ibdSegments = numpy.vstack((self.ibdSegments,
                                           my_ibdSegments) )
          self.ibdSegments_lock.release()
@@ -3677,15 +3658,10 @@ class longRangePhase:
             # TODO: move the threading deeper down. From here, we can only give one chunk for each thread, which is bad from load balancing perspective.
             handythread.foreach(lambda chunk: self.iterateOverIBD(chunk, iterations, intermedFAD=intFADbase,intermedIBD=intIBDbase),
                                 chunk_slices,
-#                                [allocedIBD[(i*chunkSize):((i+1)*chunkSize)] for i in range(self.poolSize) ],
                                 threads = self.poolSize )
             chunk_slices = None
-         #ibd_segment_cache.update(self.ibdSegments)
       else:
          pass
-      #self.ibdSegments = list(ibd_segment_cache)
-      #self.ibdSegments = None
-      #self.ibdSegments = ibd_segment_cache
       self._assist = None
 
 
