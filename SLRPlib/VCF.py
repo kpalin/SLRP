@@ -259,8 +259,8 @@ class VCF:
             n = -1
             if data['number'] == '.':                   t = self.NT_UNKNOWN
             elif data['number'] == '#alleles':          t = self.NT_ALLELES
-            elif data['number'] == '#nonref_alleles':   t = self.NT_NR_ALLELES
-            elif data['number'] == '#genotypes':        t = self.NT_GENOTYPES
+            elif data['number'] in ('A', '#nonref_alleles'):   t = self.NT_NR_ALLELES
+            elif data['number'] in ('G', '#genotypes'):        t = self.NT_GENOTYPES
             elif data['number'] == '#phased_genotypes': t = self.NT_PHASED_GENOTYPES
             else:
                 self.error(line,self.BADLY_FORMATTED_FORMAT_STRING)
